@@ -1,26 +1,210 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ========================================
+   Combustible Málaga Design System
+   ======================================== */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Surface */
+  --surface-primary: #FAFAF9;
+  --surface-secondary: #F5F5F4;
+  --surface-elevated: #FFFFFF;
+  --surface-dark: #1C1917;
+
+  /* Text */
+  --text-primary: #1C1917;
+  --text-secondary: #78716C;
+  --text-tertiary: #A8A29E;
+  --text-inverse: #FAFAF9;
+
+  /* Border */
+  --border-default: #E7E5E4;
+  --border-subtle: #F5F5F4;
+
+  /* Accent (Fuel/Amber) */
+  --accent-fuel: #D97706;
+  --accent-fuel-hover: #B45309;
+  --accent-fuel-light: #FEF3C7;
+
+  /* Price Colors */
+  --price-cheap: #16A34A;
+  --price-medium: #D97706;
+  --price-expensive: #DC2626;
+
+  /* Status */
+  --status-success: #16A34A;
+  --status-warning: #D97706;
+  --status-error: #DC2626;
+
+  /* Spacing */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  /* Motion */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+
+  /* Typography */
+  --font-display: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-body: 'DM Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', Fira Code, monospace;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+/* Base */
+@layer base {
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    scroll-behavior: smooth;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  body {
+    font-family: var(--font-body);
+    background: var(--surface-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+  }
+
+  /* Focus visible */
+  *:focus-visible {
+    outline: 2px solid var(--accent-fuel);
+    outline-offset: 2px;
+  }
+
+  /* Reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+/* Components */
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-amber-600 text-white font-semibold px-6 py-3 rounded-lg
+           hover:bg-amber-700 active:bg-amber-800
+           transition-colors duration-200
+           focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2;
+  }
+
+  .btn-secondary {
+    @apply bg-stone-100 text-stone-700 font-semibold px-6 py-3 rounded-lg
+           hover:bg-stone-200 active:bg-stone-300
+           transition-colors duration-200
+           focus-visible:ring-2 focus-visible:ring-stone-400 focus-visible:ring-offset-2;
+  }
+
+  .btn-ghost {
+    @apply bg-transparent text-stone-600 font-medium px-4 py-2 rounded-lg
+           hover:bg-stone-100 active:bg-stone-200
+           transition-colors duration-200;
+  }
+
+  .btn-sm {
+    @apply text-sm px-4 py-2 rounded-md;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white rounded-xl shadow-sm border border-stone-200 p-6;
+  }
+
+  .card-interactive {
+    @apply card hover:shadow-md transition-shadow duration-200 cursor-pointer;
+  }
+
+  .card-price {
+    @apply bg-white rounded-xl shadow-sm border-l-4 p-4;
+  }
+
+  /* Form Elements */
+  .input {
+    @apply w-full rounded-lg border border-stone-300 px-4 py-3 text-stone-900
+           placeholder:text-stone-400
+           focus:border-amber-500 focus:ring-2 focus:ring-amber-500/20 focus:outline-none
+           transition-colors duration-200;
+  }
+
+  .select {
+    @apply input bg-white cursor-pointer;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-stone-700 mb-1.5;
+  }
+
+  /* Price Colors */
+  .price-cheap {
+    @apply text-green-600;
+  }
+
+  .price-medium {
+    @apply text-amber-600;
+  }
+
+  .price-expensive {
+    @apply text-red-600;
+  }
+
+  .price-border-cheap {
+    @apply border-l-green-500;
+  }
+
+  .price-border-medium {
+    @apply border-l-amber-500;
+  }
+
+  .price-border-expensive {
+    @apply border-l-red-500;
+  }
+
+  /* Section */
+  .section {
+    @apply py-12 md:py-16 lg:py-20;
+  }
+
+  .container {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8;
+  }
+}
+
+/* Utilities */
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .text-pretty {
+    text-wrap: pretty;
+  }
+}
+
+/* Leaflet MarkerCluster custom colors */
+.leaflet-marker-cluster .leaflet-marker-cluster-content {
+  background-color: #f59e0b !important;
+  color: white !important;
+}
+.leaflet-marker-cluster .leaflet-marker-cluster-error {
+  background-color: #dc2626 !important;
+  color: white !important;
+}
+.leaflet-marker-cluster .leaflet-marker-cluster-div-icon {
+  background-color: #f59e0b !important;
+  border: 2px solid white !important;
 }
