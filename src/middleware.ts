@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import Database from "better-sqlite3";
+import { createClient } from "@libsql/client";
 
 /**
  * Middleware:
@@ -8,7 +8,8 @@ import Database from "better-sqlite3";
  *    directamente en la BD y emite un 404 HTTP real para IDs inexistentes
  *    (evita soft-404 indexables por el streaming de Next 15).
  *
- * Runtime Node: better-sqlite3 no funciona en el runtime Edge.
+ * Runtime Node (libSQL no funciona en Edge). El cliente libSQL funciona
+ * igual contra file: (local) y libsql:// (Turso) según DATABASE_URL.
  */
 
 // Estrategia canónica:
@@ -26,32 +27,44 @@ const REDIRECTS: Record<string, string> = {
   "/gasolineras-malaga": "/gasolineras/andalucia/malaga",
 };
 
-/** Conexión SQLite reutilizada entre invocaciones (single process). */
-let sqlite: Database.Database | null = null;
+/** Cliente libSQL reutilizado entre invocaciones (single process). */
+let client: ReturnType<typeof createClient> | null = null;
 
-function estacionExiste(id: string): boolean {
+function getCliente() {
+  if (!client) {
+    const url =
+      process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith("libsql://")
+        ? process.env.DATABASE_URL
+        : "file:./data/combustible.db";
+    client = createClient({
+      url,
+      authToken: process.env.DATABASE_AUTH_TOKEN || undefined,
+    });
+  }
+  return client;
+}
+
+async function estacionExiste(id: string): Promise<boolean> {
   try {
-    if (!sqlite) {
-      sqlite = new Database("./data/combustible.db", { readonly: true });
-    }
-    const row = sqlite
-      .prepare("SELECT 1 FROM estaciones WHERE id = ? LIMIT 1")
-      .get(id);
-    return row !== undefined;
+    const result = await getCliente().execute({
+      sql: "SELECT 1 FROM estaciones WHERE id = ? LIMIT 1",
+      args: [id],
+    });
+    return result.rows.length > 0;
   } catch {
     // Si la BD no está disponible, no bloquear: dejar que la página decida.
     return true;
   }
 }
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // ─── Gate 404 para estaciones inexistentes ──────────────────────────────
   const match = pathname.match(/^\/estacion\/([^/]+)$/);
   if (match) {
     const id = decodeURIComponent(match[1]);
-    if (!/^\d{1,10}$/.test(id) || !estacionExiste(id)) {
+    if (!/^\d{1,10}$/.test(id) || !(await estacionExiste(id))) {
       return new NextResponse(null, { status: 404 });
     }
     return NextResponse.next();
@@ -70,7 +83,7 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Node runtime: better-sqlite3 no está disponible en Edge
+  // Node runtime: @libsql/client no está disponible en Edge
   runtime: "nodejs",
   matcher: [
     "/estacion/:path*",

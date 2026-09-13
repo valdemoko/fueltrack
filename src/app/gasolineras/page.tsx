@@ -29,9 +29,9 @@ const jsonLd = {
     "Listado de comunidades autónomas con estaciones de servicio y precios de carburantes.",
 };
 
-export default function GasolinerasEspanaPage() {
-  const ccaaList = getCcaaConEstaciones();
-  const resumen = getResumenProductosPrincipales();
+export default async function GasolinerasEspanaPage() {
+  const ccaaList = await getCcaaConEstaciones();
+  const resumen = await getResumenProductosPrincipales();
   const totalEstaciones = ccaaList.reduce((acc, c) => acc + c.totalEstaciones, 0);
   const gasolina95 = resumen.find((r) => r.productoId === 1);
   const gasoleoA = resumen.find((r) => r.productoId === 4);

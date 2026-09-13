@@ -32,7 +32,7 @@ export async function GET(
     }
 
     // Obtener precios de la estación
-    const precios = db
+    const precios = await db
       .select({
         productoId: schema.precios.productoId,
         precio: schema.precios.precio,

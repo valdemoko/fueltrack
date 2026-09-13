@@ -40,11 +40,11 @@ export function slugify(nombre: string): string {
  * Busca una CCAA por slug URL (coincidencia sin acentos, case-insensitive).
  * Devuelve { id, nombre } o null.
  */
-export function getCcaaBySlug(
+export async function getCcaaBySlug(
   slug: string
-): { id: string; nombre: string } | null {
+): Promise<{ id: string; nombre: string } | null> {
   const candidata = slug.replace(/-/g, " ");
-  const todas = db.all(sql`SELECT id, nombre FROM ccaa`) as Array<{
+  const todas = (await db.all(sql`SELECT id, nombre FROM ccaa`)) as Array<{
     id: string;
     nombre: string;
   }>;
@@ -58,13 +58,13 @@ export function getCcaaBySlug(
 /**
  * Busca una provincia por slug dentro de una CCAA.
  */
-export function getProvinciaBySlug(
+export async function getProvinciaBySlug(
   slug: string,
   ccaaId: string
-): { id: string; nombre: string } | null {
-  const provincias = db.all(sql`
+): Promise<{ id: string; nombre: string } | null> {
+  const provincias = (await db.all(sql`
     SELECT id, nombre FROM provincias WHERE ccaa_id = ${ccaaId}
-  `) as Array<{ id: string; nombre: string }>;
+  `)) as Array<{ id: string; nombre: string }>;;
   const candidata = slug.replace(/-/g, " ");
   return (
     provincias.find((p) => slugify(p.nombre) === slug) ??
@@ -76,13 +76,13 @@ export function getProvinciaBySlug(
 /**
  * Busca un municipio por slug dentro de una provincia.
  */
-export function getMunicipioBySlug(
+export async function getMunicipioBySlug(
   slug: string,
   provinciaId: string
-): { id: string; nombre: string } | null {
-  const municipios = db.all(sql`
+): Promise<{ id: string; nombre: string } | null> {
+  const municipios = (await db.all(sql`
     SELECT id, nombre FROM municipios WHERE provincia_id = ${provinciaId}
-  `) as Array<{ id: string; nombre: string }>;
+  `)) as Array<{ id: string; nombre: string }>;;
   const candidata = slug.replace(/-/g, " ");
   return (
     municipios.find((m) => slugify(m.nombre) === slug) ??

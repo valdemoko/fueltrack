@@ -8,7 +8,7 @@
  * 4. Almacenar observaciones de precio
  */
 import { eq, and, sql } from "drizzle-orm";
-import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
+import type { LibSQLDatabase } from "drizzle-orm/libsql";
 import * as schema from "@/lib/db/schema";
 import type {
   MitecoEstacionRaw,
@@ -29,12 +29,12 @@ import { validarPrecio } from "./validacion";
  * Último precio válido previo de una estación por producto (fecha anterior
  * a la observación actual). Se usa para detectar saltos anómalos.
  */
-function preciosAnteriores(
-  database: BetterSQLite3Database<typeof schema>,
+async function preciosAnteriores(
+  database: LibSQLDatabase<typeof schema>,
   estacionId: string,
   fechaObservacion: string
-): Map<number, number> {
-  const filas = database.all(sql`
+): Promise<Map<number, number>> {
+  const filas = (await database.all(sql`
     SELECT p.producto_id, p.precio
     FROM precios p
     WHERE p.estacion_id = ${estacionId}
@@ -45,7 +45,7 @@ function preciosAnteriores(
           AND p2.producto_id = p.producto_id
           AND p2.fecha_observacion < ${fechaObservacion}
       )
-  `) as unknown as Array<{ producto_id: number; precio: number }>;
+  `)) as unknown as Array<{ producto_id: number; precio: number }>;
   return new Map(filas.map((f) => [f.producto_id, f.precio] as [number, number]));
 }
 
@@ -54,12 +54,12 @@ function preciosAnteriores(
  * Devuelve solo los precios válidos; registra los descartados y los
  * sospechosos (aceptados pero con salto grande).
  */
-function validarPreciosEstacion(
-  database: BetterSQLite3Database<typeof schema>,
+async function validarPreciosEstacion(
+  database: LibSQLDatabase<typeof schema>,
   precios: PrecioNormalizado[],
   fechaObservacion: string
-): { validos: PrecioNormalizado[]; descartados: number; sospechosos: number } {
-  const previos = preciosAnteriores(database, precios[0]?.estacionId ?? "", fechaObservacion);
+): Promise<{ validos: PrecioNormalizado[]; descartados: number; sospechosos: number }> {
+  const previos = await preciosAnteriores(database, precios[0]?.estacionId ?? "", fechaObservacion);
   const validos: PrecioNormalizado[] = [];
   let descartados = 0;
   let sospechosos = 0;
@@ -211,7 +211,7 @@ export function extraerPrecios(
  * @returns Número de estaciones procesadas
  */
 export async function ingestEstaciones(
-  db: BetterSQLite3Database<typeof schema>,
+  db: LibSQLDatabase<typeof schema>,
   provinciaId: string
 ): Promise<number> {
   console.log(`[ingest] Obteniendo estaciones de provincia ${provinciaId}...`);
@@ -230,7 +230,7 @@ export async function ingestEstaciones(
     if (!estacion) continue; // Saltar estaciones sin coordenadas
 
     // Upsert estación
-    db.insert(schema.estaciones)
+    await db.insert(schema.estaciones)
       .values({
         id: estacion.id,
         municipioId: estacion.municipioId,
@@ -270,11 +270,11 @@ export async function ingestEstaciones(
 
     // Extraer, validar e insertar precios
     const preciosBrutos = extraerPrecios(raw, fechaConsulta);
-    const { validos } = validarPreciosEstacion(db, preciosBrutos, fechaConsulta);
+    const { validos } = await validarPreciosEstacion(db, preciosBrutos, fechaConsulta);
     for (const precio of validos) {
       // Solo insertar si hay precio
       if (precio.precio !== null) {
-        db.insert(schema.precios)
+        await db.insert(schema.precios)
           .values({
             estacionId: precio.estacionId,
             productoId: precio.productoId,
@@ -310,7 +310,7 @@ export async function ingestEstaciones(
  * @returns Número de estaciones procesadas
  */
 export async function ingestHistorico(
-  db: BetterSQLite3Database<typeof schema>,
+  db: LibSQLDatabase<typeof schema>,
   fecha: string
 ): Promise<number> {
   console.log(`[ingest] Obteniendo histórico para ${fecha}...`);
@@ -328,7 +328,7 @@ export async function ingestHistorico(
     if (!estacion) continue; // Saltar estaciones sin coordenadas
 
     // Upsert estación (misma lógica que ingestEstaciones)
-    db.insert(schema.estaciones)
+    await db.insert(schema.estaciones)
       .values({
         id: estacion.id,
         municipioId: estacion.municipioId,
@@ -368,10 +368,10 @@ export async function ingestHistorico(
 
     // Extraer, validar e insertar precios históricos
     const preciosBrutos = extraerPrecios(raw, fechaObservacion);
-    const { validos } = validarPreciosEstacion(db, preciosBrutos, fechaObservacion);
+    const { validos } = await validarPreciosEstacion(db, preciosBrutos, fechaObservacion);
     for (const precio of validos) {
       if (precio.precio !== null) {
-        db.insert(schema.precios)
+        await db.insert(schema.precios)
           .values({
             estacionId: precio.estacionId,
             productoId: precio.productoId,
@@ -406,14 +406,14 @@ export async function ingestHistorico(
  * @returns Número de productos procesados
  */
 export async function ingestProductos(
-  db: BetterSQLite3Database<typeof schema>
+  db: LibSQLDatabase<typeof schema>
 ): Promise<number> {
   console.log("[ingest] Obteniendo productos petrolíferos...");
 
   const productos = await fetchProductos();
 
   for (const prod of productos) {
-    db.insert(schema.productos)
+    await db.insert(schema.productos)
       .values({
         id: prod.IDProducto,
         nombre: prod.NombreProducto,

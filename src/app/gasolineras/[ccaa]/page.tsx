@@ -21,7 +21,7 @@ interface Props {
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { ccaa: ccaaSlug } = await params;
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) return { title: "Comunidad no encontrada" };
 
   const titulo = `Gasolineras en ${ccaa.nombre} — Estaciones y precios por provincia`;
@@ -38,11 +38,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 export default async function CcaaPage({ params }: Props) {
   const { ccaa: ccaaSlug } = await params;
 
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) notFound();
 
-  const provincias = getProvinciasDeCcaa(ccaa.id);
-  const resumen = getResumenProductosPrincipales({ ccaaId: ccaa.id });
+  const provincias = await getProvinciasDeCcaa(ccaa.id);
+  const resumen = await getResumenProductosPrincipales({ ccaaId: ccaa.id });
   const totalEstaciones = provincias.reduce(
     (acc, p) => acc + p.totalEstaciones,
     0

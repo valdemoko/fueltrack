@@ -45,14 +45,14 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const { ccaa: ccaaSlug, provincia: provinciaSlug } = await params;
   const { producto: productoParam } = await searchParams;
 
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) return { title: "Provincia no encontrada" };
-  const provincia = getProvinciaBySlug(provinciaSlug, ccaa.id);
+  const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
   if (!provincia) return { title: "Provincia no encontrada" };
 
   const productoId = Number(productoParam);
   const producto = Number.isInteger(productoId)
-    ? getProductoById(productoId)
+    ? await getProductoById(productoId)
     : null;
 
   const base = `gasolineras/${ccaaSlug}/${provinciaSlug}`;
@@ -81,15 +81,15 @@ export default async function ProvinciaPage({ params, searchParams }: Props) {
   const { ccaa: ccaaSlug, provincia: provinciaSlug } = await params;
   const { producto: productoParam } = await searchParams;
 
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) notFound();
-  const provincia = getProvinciaBySlug(provinciaSlug, ccaa.id);
+  const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
   if (!provincia) notFound();
 
   const base = `gasolineras/${ccaaSlug}/${provinciaSlug}`;
 
   // ─── Cobertura de productos de la provincia (variantes indexables) ─────
-  const cobertura = getCoberturaProductos(
+  const cobertura = await getCoberturaProductos(
     { provinciaId: provincia.id },
     MIN_COBERTURA_PROVINCIA
   );
@@ -104,13 +104,13 @@ export default async function ProvinciaPage({ params, searchParams }: Props) {
   const productoActivoId =
     productoSeleccionado?.productoId ?? PRODUCTOS_CLAVE.GASOLINA_95_E5;
 
-  const municipios = getMunicipiosDeProvincia(provincia.id, productoActivoId);
-  const baratas = getEstacionesBaratas(productoActivoId, 5, {
+  const municipios = await getMunicipiosDeProvincia(provincia.id, productoActivoId);
+  const baratas = await getEstacionesBaratas(productoActivoId, 5, {
     provinciaId: provincia.id,
   });
 
   // Histórico agregado de la provincia (SSR textual)
-  const historico = getHistoricoAmbito(productoActivoId, 90, {
+  const historico = await getHistoricoAmbito(productoActivoId, 90, {
     provinciaId: provincia.id,
   });
 

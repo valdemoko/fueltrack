@@ -23,18 +23,18 @@ import { slugify } from "@/lib/geografia";
 // ─── Fechas de referencia por producto ─────────────────────────────────────
 
 /** Mapa productoId → última fecha de observación (1 seek por producto). */
-export function getUltimasFechasProductos(): Map<number, string> {
-  const productos = db.all(
+export async function getUltimasFechasProductos(): Promise<Map<number, string>> {
+  const productos = (await db.all(
     sql`SELECT id FROM productos WHERE EXISTS (
           SELECT 1 FROM precios WHERE precios.producto_id = productos.id
         )`
-  ) as unknown as Array<{ id: number }>;
+  )) as unknown as Array<{ id: number }>;
 
   const mapa = new Map<number, string>();
   for (const p of productos) {
-    const row = db.get(
+    const row = (await db.get(
       sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
-    ) as unknown as { fecha: string } | undefined;
+    )) as unknown as { fecha: string } | undefined;
     if (row?.fecha) mapa.set(p.id, row.fecha);
   }
   return mapa;
@@ -58,23 +58,23 @@ export interface CoberturaProducto {
  * ámbito geográfico, ordenados por número de estaciones descendente.
  * Si no se indica ámbito, calcula sobre toda la BD.
  */
-export function getCoberturaProductos(
+export async function getCoberturaProductos(
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {},
   minEstaciones = 1
-): CoberturaProducto[] {
-  const productos = db.all(
+): Promise<CoberturaProducto[]> {
+  const productos = (await db.all(
     sql`SELECT id, nombre, abreviatura FROM productos WHERE EXISTS (
           SELECT 1 FROM precios WHERE precios.producto_id = productos.id
         )`
-  ) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
+  )) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
 
   const resultado: CoberturaProducto[] = [];
 
   for (const producto of productos) {
     // Seek directo a la última fecha del producto (índice producto+fecha)
-    const fechaRow = db.get(
+    const fechaRow = (await db.get(
       sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${producto.id}`
-    ) as unknown as { fecha: string } | undefined;
+    )) as unknown as { fecha: string } | undefined;
     if (!fechaRow?.fecha) continue;
     const fecha = fechaRow.fecha;
 
@@ -87,7 +87,7 @@ export function getCoberturaProductos(
           ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
           : sql``;
 
-    const stats = db.get(sql`
+    const stats = (await db.get(sql`
       SELECT COUNT(DISTINCT pr.estacion_id) AS con_precio,
              ROUND(AVG(pr.precio), 4) AS precio_medio
       FROM precios pr
@@ -96,7 +96,7 @@ export function getCoberturaProductos(
         AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
         ${filtroAmbito}
-    `) as unknown as { con_precio: number; precio_medio: number | null } | undefined;
+    `)) as unknown as { con_precio: number; precio_medio: number | null } | undefined;
 
     if (!stats) continue;
     const conPrecio = Number(stats.con_precio);
@@ -137,17 +137,17 @@ export interface EstacionMunicipioProducto {
  * Las estaciones cuyo último dato es anterior a la referencia nacional
  * quedan marcadas mediante fechaUltimoPrecio (control de obsoletos).
  */
-export function getEstacionesMunicipioProducto(
+export async function getEstacionesMunicipioProducto(
   municipioId: string,
   productoId: number
-): EstacionMunicipioProducto[] {
+): Promise<EstacionMunicipioProducto[]> {
   // Fecha de referencia nacional del producto (1 seek)
-  const refRow = db.get(
+  const refRow = (await db.get(
     sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${productoId}`
-  ) as unknown as { fecha: string } | undefined;
+  )) as unknown as { fecha: string } | undefined;
   const fechaReferencia = refRow?.fecha ?? null;
 
-  const filas = db.all(sql`
+  const filas = (await db.all(sql`
     SELECT
       e.id, e.rotulo, e.direccion, e.localidad,
       m.nombre AS municipio_nombre,
@@ -173,7 +173,7 @@ export function getEstacionesMunicipioProducto(
     municipio_nombre: string;
     precio: number | null;
     fecha_ultimo_precio: string | null;
-  }>;
+  }>);
 
   return filas.map((f) => ({
     id: f.id,
@@ -200,12 +200,12 @@ export interface MunicipioCercano {
 }
 
 /** Municipios con estaciones a menos de radioKm del municipio indicado. */
-export function getMunicipiosCercanos(
+export async function getMunicipiosCercanos(
   municipioId: string,
   limite = 8,
   radioKm = 30
-): MunicipioCercano[] {
-  const centro = db.all(sql`
+): Promise<MunicipioCercano[]> {
+  const centro = (await db.all(sql`
     SELECT m.id, m.nombre, p.ccaa_id, p.id AS provincia_id,
            (SELECT AVG(e.latitud) FROM estaciones e WHERE e.municipio_id = m.id) AS lat,
            (SELECT AVG(e.longitud) FROM estaciones e WHERE e.municipio_id = m.id) AS lon
@@ -219,7 +219,7 @@ export function getMunicipiosCercanos(
     ccaa_id: string;
     lat: number | null;
     lon: number | null;
-  }>;
+  }>);
 
   const c = centro[0];
   if (!c || c.lat === null || c.lon === null) return [];
@@ -229,7 +229,7 @@ export function getMunicipiosCercanos(
   const dLon = radioKm / (111 * cos);
 
   // Vecinos: bounding box + agregación por municipio (índice municipio_id)
-  const vecinos = db.all(sql`
+  const vecinos = (await db.all(sql`
     SELECT * FROM (
       SELECT
         m2.id, m2.nombre,
@@ -261,13 +261,13 @@ export function getMunicipiosCercanos(
     nombre: string;
     total_estaciones: number;
     distancia_km: number;
-  }>;
+  }>);
 
   if (vecinos.length === 0) return [];
 
   // Slugs de los vecinos (1 query para todos)
   const ids = vecinos.map((v) => v.id);
-  const slugRows = db.all(sql`
+  const slugRows = (await db.all(sql`
     SELECT m.id, c.nombre AS ccaa_nombre, p.nombre AS provincia_nombre
     FROM municipios m
     JOIN provincias p ON p.id = m.provincia_id
@@ -277,7 +277,7 @@ export function getMunicipiosCercanos(
     id: string;
     ccaa_nombre: string;
     provincia_nombre: string;
-  }>;
+  }>);
   const slugs = new Map(
     slugRows.map((s) => [
       s.id,
@@ -325,11 +325,11 @@ export interface ResumenHistoricoAmbito {
  * `dias` limita el periodo (30/90/180/365/730).
  * Acotada por (producto_id, rango de fechas) → índice.
  */
-export function getHistoricoAmbito(
+export async function getHistoricoAmbito(
   productoId: number,
   dias: number,
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {}
-): ResumenHistoricoAmbito | null {
+): Promise<ResumenHistoricoAmbito | null> {
   const desde = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
   const hoy = new Date().toISOString().slice(0, 10);
 
@@ -341,7 +341,7 @@ export function getHistoricoAmbito(
         ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
         : sql``;
 
-  const serie = db.all(sql`
+  const serie = (await db.all(sql`
     SELECT pr.fecha_observacion AS fecha,
            ROUND(AVG(pr.precio), 4) AS precio
     FROM precios pr
@@ -353,7 +353,7 @@ export function getHistoricoAmbito(
       ${filtroAmbito}
     GROUP BY pr.fecha_observacion
     ORDER BY pr.fecha_observacion ASC
-  `) as unknown as Array<{ fecha: string; precio: number }>;
+  `)) as unknown as Array<{ fecha: string; precio: number }>;
 
   if (serie.length === 0) return null;
 
@@ -386,11 +386,11 @@ export function getHistoricoAmbito(
 }
 
 /** Nombre del producto por ID (para títulos). */
-export function getProductoById(
+export async function getProductoById(
   productoId: number
-): { id: number; nombre: string; abreviatura: string } | null {
-  const row = db.all(
+): Promise<{ id: number; nombre: string; abreviatura: string } | null> {
+  const row = (await db.all(
     sql`SELECT id, nombre, abreviatura FROM productos WHERE id = ${productoId}`
-  ) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
+  )) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
   return row[0] ?? null;
 }

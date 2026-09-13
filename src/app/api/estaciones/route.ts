@@ -40,7 +40,7 @@ export async function GET(request: Request) {
     }
 
     // Ejecutar consulta
-    const estaciones = db
+    const estaciones = await db
       .select()
       .from(schema.estaciones)
       .where(and(...conditions))
@@ -49,11 +49,11 @@ export async function GET(request: Request) {
       .all();
 
     // Contar total
-    const total = db
+    const total = (await db
       .select({ count: sql<number>`count(*)` })
       .from(schema.estaciones)
       .where(eq(schema.estaciones.provinciaId, PROVINCIA_MALAGA))
-      .get()?.count ?? 0;
+      .get())?.count ?? 0;
 
     return NextResponse.json({
       total,

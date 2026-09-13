@@ -56,16 +56,16 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     await params;
   const { producto: productoParam } = await searchParams;
 
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) return { title: "Municipio no encontrado" };
-  const provincia = getProvinciaBySlug(provinciaSlug, ccaa.id);
+  const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
   if (!provincia) return { title: "Municipio no encontrado" };
-  const municipio = getMunicipioBySlug(municipioSlug, provincia.id);
+  const municipio = await getMunicipioBySlug(municipioSlug, provincia.id);
   if (!municipio) return { title: "Municipio no encontrado" };
 
   const productoId = Number(productoParam);
   const producto = Number.isInteger(productoId)
-    ? getProductoById(productoId)
+    ? await getProductoById(productoId)
     : null;
 
   const municipioDisplay = tituloMunicipio(municipio.nombre);
@@ -97,11 +97,11 @@ export default async function MunicipioPage({ params, searchParams }: Props) {
     await params;
   const { producto: productoParam } = await searchParams;
 
-  const ccaa = getCcaaBySlug(ccaaSlug);
+  const ccaa = await getCcaaBySlug(ccaaSlug);
   if (!ccaa) notFound();
-  const provincia = getProvinciaBySlug(provinciaSlug, ccaa.id);
+  const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
   if (!provincia) notFound();
-  const municipio = getMunicipioBySlug(municipioSlug, provincia.id);
+  const municipio = await getMunicipioBySlug(municipioSlug, provincia.id);
   if (!municipio) notFound();
 
   const municipioDisplay = tituloMunicipio(municipio.nombre);
@@ -109,7 +109,7 @@ export default async function MunicipioPage({ params, searchParams }: Props) {
   const base = `gasolineras/${ccaaSlug}/${provinciaSlug}/${municipioSlug}`;
 
   // ─── Cobertura real de productos del municipio ────────────────────────
-  const cobertura = getCoberturaProductos(
+  const cobertura = await getCoberturaProductos(
     { municipioId: municipio.id },
     MIN_ESTACIONES_PRODUCTO
   );
@@ -125,7 +125,7 @@ export default async function MunicipioPage({ params, searchParams }: Props) {
         null);
 
   // ─── Datos SSR ────────────────────────────────────────────────────────
-  const estaciones = getEstacionesMunicipioProducto(
+  const estaciones = await getEstacionesMunicipioProducto(
     municipio.id,
     productoSeleccionado?.productoId ?? PRODUCTOS_CLAVE.GASOLINA_95_E5
   );
@@ -153,13 +153,13 @@ export default async function MunicipioPage({ params, searchParams }: Props) {
   ).length;
 
   // Histórico agregado del municipio (SSR textual)
-  const historico = getHistoricoAmbito(
+  const historico = await getHistoricoAmbito(
     productoSeleccionado?.productoId ?? PRODUCTOS_CLAVE.GASOLINA_95_E5,
     90,
     { municipioId: municipio.id }
   );
 
-  const cercanos = getMunicipiosCercanos(municipio.id, 8, 30);
+  const cercanos = await getMunicipiosCercanos(municipio.id, 8, 30);
 
   const nombreProducto = productoSeleccionado?.nombre ?? "gasolina 95";
   const fechaUltima =

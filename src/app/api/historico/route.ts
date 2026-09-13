@@ -55,7 +55,7 @@ export async function GET(request: Request) {
 
     // ── Modo 1: por estación individual ──
     if (estacionId) {
-      const estacion = db
+      const estacion = await db
         .select()
         .from(schema.estaciones)
         .where(eq(schema.estaciones.id, estacionId))
@@ -68,13 +68,13 @@ export async function GET(request: Request) {
         );
       }
 
-      const producto = db
+      const producto = await db
         .select()
         .from(schema.productos)
         .where(eq(schema.productos.id, productoIdNum))
         .get();
 
-      const historico = db
+      const historico = await db
         .select({
           fecha: schema.precios.fechaObservacion,
           precio: schema.precios.precio,
@@ -124,7 +124,7 @@ export async function GET(request: Request) {
       condicionesArea.push(eq(schema.estaciones.ccaaId, ccaaId));
     }
 
-    const historico = db
+    const historico = await db
       .select({
         fecha: schema.precios.fechaObservacion,
         precioMedio: sql<number>`ROUND(AVG(${schema.precios.precio}), 4)`,
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
       .limit(limite)
       .all();
 
-    const producto = db
+    const producto = await db
       .select()
       .from(schema.productos)
       .where(eq(schema.productos.id, productoIdNum))

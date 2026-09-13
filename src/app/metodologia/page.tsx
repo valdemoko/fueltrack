@@ -12,8 +12,8 @@ export const metadata: Metadata = {
   alternates: { canonical: "/metodologia" },
 };
 
-export default function MetodologiaPage() {
-  const ultimaFecha = getUltimaFechaGlobal();
+export default async function MetodologiaPage() {
+  const ultimaFecha = await getUltimaFechaGlobal();
 
   return (
     <div className="min-h-screen bg-surface-primary">

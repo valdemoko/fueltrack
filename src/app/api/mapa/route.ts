@@ -34,11 +34,11 @@ export async function GET(request: Request) {
 
   try {
     // Fecha del último precio registrado para el producto (cabecera del mapa)
-    const maxFechaRow = db
+    const maxFechaRow = (await db
       .select({ fecha: sql<string>`MAX(fecha_observacion)` })
       .from(sql`precios`)
       .where(sql`producto_id = ${producto}`)
-      .get() as { fecha: string } | undefined;
+      .get()) as { fecha: string } | undefined;
 
     const fechaPrecios = maxFechaRow?.fecha ?? null;
 
@@ -65,7 +65,7 @@ export async function GET(request: Request) {
     // por rango de índice → seek directo al último precio.
     // Payload mínimo: solo los campos que el pin/popup necesitan.
     // (direccion y horario se consultan en la página de la estación)
-    const filas = db
+    const filas = (await db
       .all(sql`
         SELECT
           e.id,
@@ -91,7 +91,7 @@ export async function GET(request: Request) {
       latitud: number;
       longitud: number;
       precio: number | null;
-    }>;
+    }>);
 
     // Estadísticas para colores
     const preciosValidos = filas

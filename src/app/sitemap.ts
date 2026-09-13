@@ -38,13 +38,13 @@ const NOMBRE_PRODUCTO: Record<number, string> = {
   5: "gasoleo-premium",
 };
 
-export default function sitemap(): MetadataRoute.Sitemap {
-  const fechaDatos = (() => {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+  const fechaDatos = await (async () => {
     try {
-      const row = db
+      const row = (await db
         .select({ fecha: sql<string>`MAX(fecha_observacion)` })
         .from(sql`precios`)
-        .get() as { fecha: string } | undefined;
+        .get()) as { fecha: string } | undefined;
       if (!row?.fecha) return new Date();
       const d = new Date(`${row.fecha}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? new Date() : d;
@@ -70,13 +70,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
   let geo: MetadataRoute.Sitemap = [];
   let productoURLs: MetadataRoute.Sitemap = [];
   try {
-    const ccaaRows = db
+    const ccaaRows = ((await db
       .all(
         sql`SELECT c.id, c.nombre FROM ccaa c
             JOIN estaciones e ON e.ccaa_id = c.id
             GROUP BY c.id, c.nombre`
-      )
-      .map((r: unknown) => r as { id: string; nombre: string });
+      )) as Array<{ id: string; nombre: string }>);
 
     const ccaaUrls: MetadataRoute.Sitemap = [];
     const provinciaUrls: MetadataRoute.Sitemap = [];
@@ -91,14 +90,13 @@ export default function sitemap(): MetadataRoute.Sitemap {
         priority: 0.8,
       });
 
-      const provincias = db
+      const provincias = ((await db
         .all(
           sql`SELECT p.id, p.nombre FROM provincias p
               JOIN estaciones e ON e.provincia_id = p.id
               WHERE p.ccaa_id = ${ccaa.id}
               GROUP BY p.id, p.nombre`
-        )
-        .map((r: unknown) => r as { id: string; nombre: string });
+        )) as Array<{ id: string; nombre: string }>);
 
       for (const provincia of provincias) {
         const provinciaSlug = slugify(provincia.nombre);
@@ -110,7 +108,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
         });
 
         // Municipios con suficientes estaciones (calidad > cantidad)
-        const municipios = db
+        const municipios = (await db
           .all(sql`
             SELECT m.id, m.nombre, COUNT(e.id) AS n
             FROM municipios m
@@ -118,7 +116,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
             WHERE m.provincia_id = ${provincia.id}
             GROUP BY m.id, m.nombre
             HAVING n >= ${MIN_ESTACIONES_MUNICIPIO}
-          `) as Array<{ id: string; nombre: string; n: number }>;
+          `)) as Array<{ id: string; nombre: string; n: number }>;
 
         for (const municipio of municipios) {
           municipioUrls.push({
@@ -138,24 +136,24 @@ export default function sitemap(): MetadataRoute.Sitemap {
     productoURLs = [];
 
     // Fechas máximas por producto con datos (1 seek por producto)
-    const productosConDatos = db.all(sql`
+    const productosConDatos = (await db.all(sql`
       SELECT id FROM productos WHERE EXISTS (
         SELECT 1 FROM precios WHERE precios.producto_id = productos.id
       )
-    `) as unknown as Array<{ id: number }>;
+    `)) as unknown as Array<{ id: number }>;
 
     const coberturas: Array<{ productoId: number; fecha: string }> = [];
     for (const producto of productosConDatos) {
-      const f = db.get(
+      const f = (await db.get(
         sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${producto.id}`
-      ) as unknown as { fecha: string } | undefined;
+      )) as unknown as { fecha: string } | undefined;
       if (f?.fecha) coberturas.push({ productoId: producto.id, fecha: f.fecha });
     }
 
     // Combustible + provincia
     const coberturaProvincia: Array<{ provincia_id: string; producto_id: number }> = [];
     for (const { productoId, fecha } of coberturas) {
-      const filas = db.all(sql`
+      const filas = (await db.all(sql`
         SELECT e.provincia_id
         FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
         WHERE pr.producto_id = ${productoId}
@@ -163,16 +161,16 @@ export default function sitemap(): MetadataRoute.Sitemap {
           AND pr.precio IS NOT NULL
         GROUP BY e.provincia_id
         HAVING COUNT(DISTINCT pr.estacion_id) >= ${MIN_COBERTURA_PRODUCTO_PROVINCIA}
-      `) as unknown as Array<{ provincia_id: string }>;
+      `)) as unknown as Array<{ provincia_id: string }>;
       for (const fila of filas) {
         coberturaProvincia.push({ provincia_id: fila.provincia_id, producto_id: productoId });
       }
     }
 
-    const nombresProvincias = db.all(sql`
+    const nombresProvincias = (await db.all(sql`
       SELECT p.id, p.nombre, c.nombre AS ccaa_nombre
       FROM provincias p JOIN ccaa c ON c.id = p.ccaa_id
-    `) as unknown as Array<{ id: string; nombre: string; ccaa_nombre: string }>;
+    `)) as unknown as Array<{ id: string; nombre: string; ccaa_nombre: string }>;
     const nombreProv = new Map(
       nombresProvincias.map((p) => [p.id, { nombre: p.nombre, ccaa: p.ccaa_nombre }])
     );
@@ -192,7 +190,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     // Combustible + municipio (solo municipios ya indexables y con cobertura)
     const coberturaMunicipio: Array<{ municipio_id: string; producto_id: number }> = [];
     for (const { productoId, fecha } of coberturas) {
-      const filas = db.all(sql`
+      const filas = (await db.all(sql`
         SELECT e.municipio_id
         FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
         WHERE pr.producto_id = ${productoId}
@@ -200,14 +198,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
           AND pr.precio IS NOT NULL
         GROUP BY e.municipio_id
         HAVING COUNT(DISTINCT pr.estacion_id) >= ${MIN_COBERTURA_PRODUCTO_MUNICIPIO}
-      `) as unknown as Array<{ municipio_id: string }>;
+      `)) as unknown as Array<{ municipio_id: string }>;
       for (const fila of filas) {
         coberturaMunicipio.push({ municipio_id: fila.municipio_id, producto_id: productoId });
       }
     }
 
     // Slugs de municipios indexables (mismo umbral que el listado general)
-    const municipiosIndexables = db.all(sql`
+    const municipiosIndexables = (await db.all(sql`
       SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
              (SELECT COUNT(*) FROM estaciones e2 WHERE e2.municipio_id = m.id) AS n_estaciones
       FROM municipios m
@@ -220,7 +218,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       provincia_nombre: string;
       ccaa_nombre: string;
       n_estaciones: number;
-    }>;
+    }>);
     const municipioIndexable = new Map(
       municipiosIndexables.map((m) => [
         m.id,
@@ -246,7 +244,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   // ─── Estaciones: top por municipio (staged) ─────────────────────────────
   let estaciones: MetadataRoute.Sitemap = [];
   try {
-    const filas = db
+    const filas = (await db
       .all(sql`
         SELECT e.id, e.fecha_actualizacion
         FROM estaciones e
@@ -260,7 +258,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
         ) >= ${MIN_ESTACIONES_MUNICIPIO}
         ORDER BY e.fecha_actualizacion DESC
         LIMIT ${MAX_ESTACIONES_SITEMAP}
-      `) as Array<{ id: string; fecha_actualizacion: string }>;
+      `)) as Array<{ id: string; fecha_actualizacion: string }>;
 
     estaciones = filas.map((e) => {
       const d = new Date(`${e.fecha_actualizacion}T00:00:00Z`);

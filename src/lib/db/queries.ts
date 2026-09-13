@@ -6,13 +6,18 @@
  * en la tabla `precios`); computar agregados en SQL (no en JS) y usar los
  * índices existentes.
  */
-import { eq, sql, and, ne } from "drizzle-orm";
+import { eq, sql, and, ne, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "./schema";
 
+/** SELECT genérico tipado contra el driver async (equivale al antiguo db.all síncrono). */
+function all<T>(q: SQL): Promise<T[]> {
+  return db.all(q) as unknown as Promise<T[]>;
+}
+
 /** Última fecha de observación disponible para un producto. */
-export function getUltimaFechaProducto(productoId: number): string | null {
-  const row = db
+export async function getUltimaFechaProducto(productoId: number): Promise<string | null> {
+  const row = await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
     .from(schema.precios)
     .where(eq(schema.precios.productoId, productoId))
@@ -21,8 +26,8 @@ export function getUltimaFechaProducto(productoId: number): string | null {
 }
 
 /** Última fecha de observación disponible en toda la base de datos. */
-export function getUltimaFechaGlobal(): string | null {
-  const row = db
+export async function getUltimaFechaGlobal(): Promise<string | null> {
+  const row = await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
     .from(schema.precios)
     .get();
@@ -65,15 +70,22 @@ function condicionesAmbito(ambito: AmbitoGeografico) {
  * Resumen de precios (media/min/max/estaciones) de UN producto en un ámbito,
  * usando solo la última fecha de observación disponible de ese producto.
  */
-export function getResumenProducto(
+export async function getResumenProducto(
   productoId: number,
   ambito: AmbitoGeografico = {}
-): ResumenProducto | null {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<ResumenProducto | null> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return null;
 
-  const row = db
-    .all(sql`
+  const row = await all<{
+    producto_id: number;
+    nombre: string;
+    abreviatura: string;
+    precio_medio: number | null;
+    precio_min: number | null;
+    precio_max: number | null;
+    total_estaciones: number;
+  }>(sql`
       SELECT
         pr.producto_id,
         p.nombre,
@@ -90,15 +102,7 @@ export function getResumenProducto(
         AND pr.precio IS NOT NULL
         AND ${condicionesAmbito(ambito)}
       GROUP BY pr.producto_id, p.nombre, p.abreviatura
-    `) as Array<{
-    producto_id: number;
-    nombre: string;
-    abreviatura: string;
-    precio_medio: number | null;
-    precio_min: number | null;
-    precio_max: number | null;
-    total_estaciones: number;
-  }>;
+    `);
 
   const r = row[0];
   if (!r || r.total_estaciones === 0) return null;
@@ -118,13 +122,12 @@ export function getResumenProducto(
  * Resumen de precios de los principales productos en un ámbito.
  * (productos: gasolina 95 E5, gasolina 98 E5, gasóleo A, gasóleo premium)
  */
-export function getResumenProductosPrincipales(
+export async function getResumenProductosPrincipales(
   ambito: AmbitoGeografico = {}
-): ResumenProducto[] {
+): Promise<ResumenProducto[]> {
   const ids = [1, 3, 4, 5];
-  return ids
-    .map((id) => getResumenProducto(id, ambito))
-    .filter((r): r is ResumenProducto => r !== null);
+  const res = await Promise.all(ids.map((id) => getResumenProducto(id, ambito)));
+  return res.filter((r): r is ResumenProducto => r !== null);
 }
 
 // ─── Estadísticas por municipio (para páginas de provincia) ───────────────
@@ -139,15 +142,21 @@ export interface MunicipioStats {
 }
 
 /** Municipios de una provincia con estadísticas del producto indicado. */
-export function getMunicipiosDeProvincia(
+export async function getMunicipiosDeProvincia(
   provinciaId: string,
   productoId: number
-): MunicipioStats[] {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<MunicipioStats[]> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return [];
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{
+    municipio_id: string;
+    municipio_nombre: string;
+    total_estaciones: number;
+    precio_medio: number | null;
+    precio_min: number | null;
+    precio_max: number | null;
+  }>(sql`
       SELECT
         m.id AS municipio_id,
         m.nombre AS municipio_nombre,
@@ -165,14 +174,7 @@ export function getMunicipiosDeProvincia(
       GROUP BY m.id, m.nombre
       HAVING total_estaciones > 0
       ORDER BY m.nombre ASC
-    `) as Array<{
-    municipio_id: string;
-    municipio_nombre: string;
-    total_estaciones: number;
-    precio_medio: number | null;
-    precio_min: number | null;
-    precio_max: number | null;
-  }>;
+    `);
 
   return filas.map((f) => ({
     municipioId: f.municipio_id,
@@ -196,16 +198,22 @@ export interface EstacionConPrecio {
 }
 
 /** Estaciones de un municipio, ordenadas por precio del producto indicado. */
-export function getEstacionesDeMunicipio(
+export async function getEstacionesDeMunicipio(
   municipioId: string,
   productoId: number,
   limite = 200
-): EstacionConPrecio[] {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<EstacionConPrecio[]> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return [];
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{
+    id: string;
+    rotulo: string | null;
+    direccion: string;
+    localidad: string;
+    fecha_actualizacion: string;
+    precio: number | null;
+  }>(sql`
       SELECT
         e.id,
         e.rotulo,
@@ -224,14 +232,7 @@ export function getEstacionesDeMunicipio(
       WHERE e.municipio_id = ${municipioId}
       ORDER BY precio IS NULL, precio ASC, e.localidad ASC, e.id ASC
       LIMIT ${limite}
-    `) as Array<{
-    id: string;
-    rotulo: string | null;
-    direccion: string;
-    localidad: string;
-    fecha_actualizacion: string;
-    precio: number | null;
-  }>;
+    `);
   return filas.map((f) => ({
     id: f.id,
     rotulo: f.rotulo,
@@ -243,16 +244,22 @@ export function getEstacionesDeMunicipio(
 }
 
 /** Estaciones de una provincia (para páginas de provincia), con precio. */
-export function getEstacionesDeProvincia(
+export async function getEstacionesDeProvincia(
   provinciaId: string,
   productoId: number,
   limite = 50
-): EstacionConPrecio[] {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<EstacionConPrecio[]> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return [];
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{
+    id: string;
+    rotulo: string | null;
+    direccion: string;
+    localidad: string;
+    fecha_actualizacion: string;
+    precio: number | null;
+  }>(sql`
       SELECT
         e.id,
         e.rotulo,
@@ -271,14 +278,7 @@ export function getEstacionesDeProvincia(
       WHERE e.provincia_id = ${provinciaId}
       ORDER BY precio IS NULL, precio ASC, e.localidad ASC, e.id ASC
       LIMIT ${limite}
-    `) as Array<{
-    id: string;
-    rotulo: string | null;
-    direccion: string;
-    localidad: string;
-    fecha_actualizacion: string;
-    precio: number | null;
-  }>;
+    `);
   return filas.map((f) => ({
     id: f.id,
     rotulo: f.rotulo,
@@ -304,17 +304,16 @@ export interface ResumenHistorico {
   observaciones: number;
 }
 
-export function getResumenHistoricoEstacion(
+export async function getResumenHistoricoEstacion(
   estacionId: string,
   productoId: number,
   dias = 30
-): ResumenHistorico | null {
+): Promise<ResumenHistorico | null> {
   const desde = new Date(Date.now() - dias * 86400000)
     .toISOString()
     .slice(0, 10);
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{ fecha_observacion: string; precio: number }>(sql`
       SELECT fecha_observacion, precio
       FROM precios
       WHERE estacion_id = ${estacionId}
@@ -322,7 +321,7 @@ export function getResumenHistoricoEstacion(
         AND fecha_observacion >= ${desde}
         AND precio IS NOT NULL
       ORDER BY fecha_observacion ASC
-    `) as Array<{ fecha_observacion: string; precio: number }>;
+    `);
 
   if (filas.length === 0) return null;
 
@@ -360,15 +359,14 @@ export interface CcaaInfo {
   totalEstaciones: number;
 }
 
-export function getCcaaConEstaciones(): CcaaInfo[] {
-  const filas = db
-    .all(sql`
+export async function getCcaaConEstaciones(): Promise<CcaaInfo[]> {
+  const filas = await all<{ id: string; nombre: string; total_estaciones: number }>(sql`
       SELECT c.id, c.nombre, COUNT(e.id) AS total_estaciones
       FROM ccaa c
       JOIN estaciones e ON e.ccaa_id = c.id
       GROUP BY c.id, c.nombre
       ORDER BY c.nombre ASC
-    `) as Array<{ id: string; nombre: string; total_estaciones: number }>;
+    `);
   return filas.map((f) => ({
     id: f.id,
     nombre: f.nombre,
@@ -376,13 +374,13 @@ export function getCcaaConEstaciones(): CcaaInfo[] {
   }));
 }
 
-export function getCcaaById(id: string): { id: string; nombre: string } | null {
+export async function getCcaaById(id: string): Promise<{ id: string; nombre: string } | null> {
   return (
-    db
+    (await db
       .select({ id: schema.ccaa.id, nombre: schema.ccaa.nombre })
       .from(schema.ccaa)
       .where(eq(schema.ccaa.id, id))
-      .get() ?? null
+      .get()) ?? null
   );
 }
 
@@ -394,9 +392,8 @@ export interface ProvinciaInfo {
   totalEstaciones: number;
 }
 
-export function getProvinciasDeCcaa(ccaaId: string): ProvinciaInfo[] {
-  const filas = db
-    .all(sql`
+export async function getProvinciasDeCcaa(ccaaId: string): Promise<ProvinciaInfo[]> {
+  const filas = (await await all(sql`
       SELECT p.id, p.nombre, p.ccaa_id, c.nombre AS ccaa_nombre,
              COUNT(e.id) AS total_estaciones
       FROM provincias p
@@ -405,7 +402,7 @@ export function getProvinciasDeCcaa(ccaaId: string): ProvinciaInfo[] {
       WHERE p.ccaa_id = ${ccaaId}
       GROUP BY p.id, p.nombre, p.ccaa_id, c.nombre
       ORDER BY p.nombre ASC
-    `) as Array<{
+    `)) as Array<{
     id: string;
     nombre: string;
     ccaa_id: string;
@@ -421,16 +418,15 @@ export function getProvinciasDeCcaa(ccaaId: string): ProvinciaInfo[] {
   }));
 }
 
-export function getProvinciaById(
+export async function getProvinciaById(
   id: string
-): { id: string; nombre: string; ccaaId: string; ccaaNombre: string } | null {
-  const row = db
-    .all(sql`
+): Promise<{ id: string; nombre: string; ccaaId: string; ccaaNombre: string } | null> {
+  const row = (await await all(sql`
       SELECT p.id, p.nombre, p.ccaa_id, c.nombre AS ccaa_nombre
       FROM provincias p
       JOIN ccaa c ON c.id = p.ccaa_id
       WHERE p.id = ${id}
-    `) as Array<{
+    `)) as Array<{
     id: string;
     nombre: string;
     ccaa_id: string;
@@ -442,32 +438,31 @@ export function getProvinciaById(
     : null;
 }
 
-export function getMunicipioById(
+export async function getMunicipioById(
   id: string
-): {
+): Promise<{
   id: string;
   nombre: string;
   provinciaId: string;
   provinciaNombre: string;
   ccaaId: string;
   ccaaNombre: string;
-} | null {
-  const row = db
-    .all(sql`
-      SELECT m.id, m.nombre, m.provincia_id, p.nombre AS provincia_nombre,
-             p.ccaa_id, c.nombre AS ccaa_nombre
-      FROM municipios m
-      JOIN provincias p ON p.id = m.provincia_id
-      JOIN ccaa c ON c.id = p.ccaa_id
-      WHERE m.id = ${id}
-    `) as Array<{
+} | null> {
+  const row = await all<{
     id: string;
     nombre: string;
     provincia_id: string;
     provincia_nombre: string;
     ccaa_id: string;
     ccaa_nombre: string;
-  }>;
+  }>(sql`
+      SELECT m.id, m.nombre, m.provincia_id, p.nombre AS provincia_nombre,
+             p.ccaa_id, c.nombre AS ccaa_nombre
+      FROM municipios m
+      JOIN provincias p ON p.id = m.provincia_id
+      JOIN ccaa c ON c.id = p.ccaa_id
+      WHERE m.id = ${id}
+    `);
   const r = row[0];
   return r
     ? {
@@ -503,9 +498,8 @@ export interface EstacionDetalle {
   ccaaNombre: string;
 }
 
-export function getEstacionDetalle(id: string): EstacionDetalle | null {
-  const row = db
-    .all(sql`
+export async function getEstacionDetalle(id: string): Promise<EstacionDetalle | null> {
+  const row = await all(sql`
       SELECT e.*, m.nombre AS municipio_nombre,
              p.id AS provincia_id, p.nombre AS provincia_nombre,
              c.id AS ccaa_id, c.nombre AS ccaa_nombre
@@ -569,11 +563,16 @@ export interface PrecioProducto {
   fecha: string;
 }
 
-export function getPreciosActualesEstacion(
+export async function getPreciosActualesEstacion(
   estacionId: string
-): PrecioProducto[] {
-  const filas = db
-    .all(sql`
+): Promise<PrecioProducto[]> {
+  const filas = await all<{
+    producto_id: number;
+    precio: number | null;
+    fecha_observacion: string;
+    nombre: string;
+    abreviatura: string;
+  }>(sql`
       SELECT pr.producto_id, pr.precio, pr.fecha_observacion,
              p.nombre, p.abreviatura
       FROM precios pr
@@ -583,13 +582,7 @@ export function getPreciosActualesEstacion(
           SELECT MAX(fecha_observacion) FROM precios
           WHERE estacion_id = pr.estacion_id AND producto_id = pr.producto_id
         )
-    `) as Array<{
-    producto_id: number;
-    precio: number | null;
-    fecha_observacion: string;
-    nombre: string;
-    abreviatura: string;
-  }>;
+    `);
   return filas.map((f) => ({
     productoId: f.producto_id,
     nombre: f.nombre,
@@ -610,15 +603,19 @@ export interface ComparativaZona {
   totalEstaciones: number;
 }
 
-export function getComparativaZona(
+export async function getComparativaZona(
   municipioId: string,
   productoId: number
-): ComparativaZona | null {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<ComparativaZona | null> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return null;
 
-  const row = db
-    .all(sql`
+  const row = await all<{
+    precio_medio: number | null;
+    precio_min: number | null;
+    precio_max: number | null;
+    total_estaciones: number;
+  }>(sql`
       SELECT
         ROUND(AVG(pr.precio), 4) AS precio_medio,
         MIN(pr.precio) AS precio_min,
@@ -630,12 +627,7 @@ export function getComparativaZona(
         AND pr.producto_id = ${productoId}
         AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
-    `) as Array<{
-    precio_medio: number | null;
-    precio_min: number | null;
-    precio_max: number | null;
-    total_estaciones: number;
-  }>;
+    `);
 
   const r = row[0];
   if (!r || r.total_estaciones === 0 || r.precio_medio === null) return null;
@@ -661,23 +653,29 @@ export interface EstacionCercana {
   precio: number | null;
 }
 
-export function getEstacionesCercanas(
+export async function getEstacionesCercanas(
   estacionId: string,
   latitud: number,
   longitud: number,
   productoId: number,
   radioKm = 10,
   limite = 8
-): EstacionCercana[] {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<EstacionCercana[]> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return [];
 
   // Aproximación del bounding box: 1 grado lat ≈ 111 km; lon ≈ 111·cos(lat)
   const dLat = radioKm / 111;
   const dLon = radioKm / (111 * Math.cos((latitud * Math.PI) / 180) || 1);
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{
+    id: string;
+    rotulo: string | null;
+    direccion: string;
+    localidad: string;
+    distancia_km: number;
+    precio: number | null;
+  }>(sql`
       SELECT * FROM (
         SELECT
           e.id,
@@ -709,14 +707,7 @@ export function getEstacionesCercanas(
       WHERE distancia_km <= ${radioKm}
       ORDER BY distancia_km ASC
       LIMIT ${limite}
-    `) as Array<{
-    id: string;
-    rotulo: string | null;
-    direccion: string;
-    localidad: string;
-    distancia_km: number;
-    precio: number | null;
-  }>;
+    `);
   return filas.map((f) => ({
     id: f.id,
     rotulo: f.rotulo,
@@ -730,26 +721,28 @@ export function getEstacionesCercanas(
 // ─── Municipios (listado general para SEO) ────────────────────────────────
 
 /** Municipios con estaciones, con conteo (para páginas de provincia). */
-export function getMunicipiosConEstaciones() {
-  return db
-    .all(sql`
+export async function getMunicipiosConEstaciones() {
+  return await all<{
+    municipio_id: string;
+    municipio_nombre: string;
+    total_estaciones: number;
+  }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
              COUNT(e.id) AS total_estaciones
       FROM municipios m
       JOIN estaciones e ON e.municipio_id = m.id
       GROUP BY m.id, m.nombre
       ORDER BY m.nombre ASC
-    `) as Array<{
-    municipio_id: string;
-    municipio_nombre: string;
-    total_estaciones: number;
-  }>;
+    `);
 }
 
 /** Municipios de una provincia con conteo de estaciones (todas). */
-export function getMunicipiosConConteo(provinciaId: string) {
-  return db
-    .all(sql`
+export async function getMunicipiosConConteo(provinciaId: string) {
+  return await all<{
+    municipio_id: string;
+    municipio_nombre: string;
+    total_estaciones: number;
+  }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
              COUNT(e.id) AS total_estaciones
       FROM municipios m
@@ -758,11 +751,7 @@ export function getMunicipiosConConteo(provinciaId: string) {
       GROUP BY m.id, m.nombre
       HAVING total_estaciones > 0
       ORDER BY total_estaciones DESC, m.nombre ASC
-    `) as Array<{
-    municipio_id: string;
-    municipio_nombre: string;
-    total_estaciones: number;
-  }>;
+    `);
 }
 
 // ─── Compatibilidad con landings existentes ───────────────────────────────
@@ -771,9 +760,16 @@ export function getMunicipiosConConteo(provinciaId: string) {
  * @deprecated Usar getResumenProducto / getResumenProductosPrincipales.
  * Mantenida mientras existan páginas que la llamen.
  */
-export function getPreciosMedios() {
-  return db
-    .all(sql`
+export async function getPreciosMedios() {
+  return await all<{
+    producto_id: number;
+    nombre: string;
+    abreviatura: string;
+    precio_medio: number;
+    precio_min: number;
+    precio_max: number;
+    total_estaciones: number;
+  }>(sql`
       SELECT pr.producto_id, p.nombre, p.abreviatura,
              ROUND(AVG(pr.precio), 4) AS precio_medio,
              MIN(pr.precio) AS precio_min,
@@ -784,28 +780,26 @@ export function getPreciosMedios() {
       WHERE pr.precio IS NOT NULL
       GROUP BY pr.producto_id, p.nombre, p.abreviatura
       ORDER BY pr.producto_id ASC
-    `) as Array<{
-    producto_id: number;
-    nombre: string;
-    abreviatura: string;
-    precio_medio: number;
-    precio_min: number;
-    precio_max: number;
-    total_estaciones: number;
-  }>;
+    `);
 }
 
 /** Estaciones más baratas de un producto en un ámbito. */
-export function getEstacionesBaratas(
+export async function getEstacionesBaratas(
   productoId: number,
   limite = 10,
   ambito: AmbitoGeografico = {}
-): EstacionConPrecio[] {
-  const fecha = getUltimaFechaProducto(productoId);
+): Promise<EstacionConPrecio[]> {
+  const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return [];
 
-  const filas = db
-    .all(sql`
+  const filas = await all<{
+    id: string;
+    rotulo: string | null;
+    direccion: string;
+    localidad: string;
+    fecha_actualizacion: string;
+    precio: number;
+  }>(sql`
       SELECT
         e.id,
         e.rotulo,
@@ -821,14 +815,7 @@ export function getEstacionesBaratas(
         AND ${condicionesAmbito(ambito)}
       ORDER BY pr.precio ASC
       LIMIT ${limite}
-    `) as Array<{
-    id: string;
-    rotulo: string | null;
-    direccion: string;
-    localidad: string;
-    fecha_actualizacion: string;
-    precio: number;
-  }>;
+    `);
   return filas.map((f) => ({
     id: f.id,
     rotulo: f.rotulo,
@@ -843,9 +830,15 @@ export function getEstacionesBaratas(
  * @deprecated Usar getMunicipiosDeProvincia.
  * Media por municipio sin filtrar fecha (mantenida por compatibilidad).
  */
-export function getPreciosPorMunicipio(productoId: number) {
-  return db
-    .all(sql`
+export async function getPreciosPorMunicipio(productoId: number) {
+  return await all<{
+    municipio_id: string;
+    municipio_nombre: string;
+    precio_medio: number;
+    precio_min: number;
+    precio_max: number;
+    total_estaciones: number;
+  }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
              ROUND(AVG(pr.precio), 4) AS precio_medio,
              MIN(pr.precio) AS precio_min,
@@ -857,12 +850,5 @@ export function getPreciosPorMunicipio(productoId: number) {
       WHERE pr.producto_id = ${productoId} AND pr.precio IS NOT NULL
       GROUP BY m.id, m.nombre
       ORDER BY precio_medio ASC
-    `) as Array<{
-    municipio_id: string;
-    municipio_nombre: string;
-    precio_medio: number;
-    precio_min: number;
-    precio_max: number;
-    total_estaciones: number;
-  }>;
+    `);
 }

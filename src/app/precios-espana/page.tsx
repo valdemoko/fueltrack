@@ -39,7 +39,7 @@ function formatearFechaCorta(fecha: string | null): string {
   return `${d}/${m}/${y}`;
 }
 
-export default function PreciosEspanaPage() {
+export default async function PreciosEspanaPage() {
   // Medias nacionales de los 4 productos principales (última observación)
   const idsPrincipales: number[] = [
     PRODUCTOS_CLAVE.GASOLINA_95_E5,
@@ -52,25 +52,27 @@ export default function PreciosEspanaPage() {
     PRODUCTOS_CLAVE.GASOLINA_98_E5,
     PRODUCTOS_CLAVE.GASOLEO_A,
   ];
-  const nacionales = getCoberturaProductos({}, 1);
+  const nacionales = await getCoberturaProductos({}, 1);
   const principales = nacionales.filter((c) => idsPrincipales.includes(c.productoId));
 
   // Histórico nacional (90 días) por producto principal
-  const historicos = new Map(
-    idsHistorico
-      .map((id) => [id, getHistoricoAmbito(id, 90)] as const)
-      .filter(([, h]) => h !== null)
+  const historicosEntries = await Promise.all(
+    idsHistorico.map(async (id) => [id, await getHistoricoAmbito(id, 90)] as const)
   );
+  const historicos = new Map(historicosEntries.filter(([, h]) => h !== null));
 
   // Comparativa por CCAA del producto principal (gasolina 95)
-  const ccaaList = getCcaaConEstaciones();
-  const comparativaCCAA = ccaaList
-    .map((c) => ({
-      ...c,
-      resumen95: getResumenProducto(PRODUCTOS_CLAVE.GASOLINA_95_E5, {
-        ccaaId: c.id,
-      }),
-    }))
+  const ccaaList = await getCcaaConEstaciones();
+  const comparativaCCAA = (
+    await Promise.all(
+      ccaaList.map(async (c) => ({
+        ...c,
+        resumen95: await getResumenProducto(PRODUCTOS_CLAVE.GASOLINA_95_E5, {
+          ccaaId: c.id,
+        }),
+      }))
+    )
+  )
     .filter((c) => c.resumen95 !== null)
     .sort((a, b) => (a.resumen95!.precioMedio ?? 0) - (b.resumen95!.precioMedio ?? 0));
 

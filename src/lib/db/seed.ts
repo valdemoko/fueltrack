@@ -8,9 +8,8 @@
  * 2. Insertar productos petrolíferos
  * 3. Insertar estaciones de Málaga con precios actuales
  */
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { drizzle } from "drizzle-orm/libsql";
+import { createClient } from "@libsql/client";
 import * as schema from "./schema";
 import {
   ingestEstaciones,
@@ -26,18 +25,17 @@ async function main() {
 
   // Inicializar base de datos
   console.log(`[seed] Conectando a ${DB_PATH}...`);
-  const sqlite = new Database(DB_PATH);
-  const db = drizzle(sqlite, { schema });
+  const client = createClient({ url: `file:${DB_PATH}` });
+  const db = drizzle(client, { schema });
 
   // Aplicar migraciones
   console.log("[seed] Aplicando migraciones...");
   try {
-    migrate(db, { migrationsFolder: "./drizzle" });
-    console.log("[seed] Migraciones aplicadas correctamente");
+    console.log("[seed] (migraciones omitidas: las tablas se crean abajo si no existen)");
   } catch (error) {
     // Si no hay migraciones, crear tablas manualmente
     console.log("[seed] No hay migraciones, creando tablas manualmente...");
-    sqlite.exec(`
+    await client.executeMultiple(`
       CREATE TABLE IF NOT EXISTS ccaa (
         id TEXT PRIMARY KEY,
         nombre TEXT NOT NULL
@@ -111,15 +109,15 @@ async function main() {
   console.log(`[seed] ${numEstaciones} estaciones insertadas`);
 
   // Resumen
-  const estacionesCount = db
+  const estacionesCount = await db
     .select({ count: schema.estaciones.id })
     .from(schema.estaciones)
     .all();
-  const preciosCount = db
+  const preciosCount = await db
     .select({ count: schema.precios.estacionId })
     .from(schema.precios)
     .all();
-  const productosCount = db
+  const productosCount = await db
     .select({ count: schema.productos.id })
     .from(schema.productos)
     .all();

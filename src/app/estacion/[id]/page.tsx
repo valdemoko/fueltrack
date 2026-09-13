@@ -37,7 +37,7 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
-  const estacion = getEstacionDetalle(id);
+  const estacion = await getEstacionDetalle(id);
   // notFound() también en metadata: al resolver antes del flush del shell,
   // garantiza una respuesta 404 HTTP real para IDs inexistentes.
   if (!estacion) notFound();
@@ -56,11 +56,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
 
 export default async function EstacionPage({ params }: Props) {
   const { id } = await params;
-  const estacion = getEstacionDetalle(id);
+  const estacion = await getEstacionDetalle(id);
   if (!estacion) notFound();
 
   // ─── Precios actuales (SSR, uno por producto) ─────────────────────────
-  const precios = getPreciosActualesEstacion(estacion.id);
+  const precios = await getPreciosActualesEstacion(estacion.id);
   const preciosTabla = precios.map((p) => ({
     productoId: p.productoId,
     nombre: p.nombre,
@@ -69,7 +69,7 @@ export default async function EstacionPage({ params }: Props) {
   }));
 
   // ─── Comparación con la zona (gasolina 95 como referencia) ────────────
-  const comparativa95 = getComparativaZona(
+  const comparativa95 = await getComparativaZona(
     estacion.municipioId,
     PRODUCTOS_CLAVE.GASOLINA_95_E5
   );
@@ -78,7 +78,7 @@ export default async function EstacionPage({ params }: Props) {
   );
 
   // ─── Estaciones cercanas ──────────────────────────────────────────────
-  const cercanas = getEstacionesCercanas(
+  const cercanas = await getEstacionesCercanas(
     estacion.id,
     estacion.latitud,
     estacion.longitud,
@@ -88,7 +88,7 @@ export default async function EstacionPage({ params }: Props) {
   );
 
   // ─── Resumen histórico textual (SSR, sin JS) ──────────────────────────
-  const historico30 = getResumenHistoricoEstacion(
+  const historico30 = await getResumenHistoricoEstacion(
     estacion.id,
     PRODUCTOS_CLAVE.GASOLINA_95_E5,
     30
@@ -96,7 +96,7 @@ export default async function EstacionPage({ params }: Props) {
 
   // ─── Control de datos obsoletos ──────────────────────────────────────
   // ¿Tiene esta estación precios en la última observación del producto?
-  const fechasReferencia = getUltimasFechasProductos();
+  const fechasReferencia = await getUltimasFechasProductos();
   const fechaG95 = fechasReferencia.get(PRODUCTOS_CLAVE.GASOLINA_95_E5);
   const ultimoPrecioG95 = precios.find(
     (p) => p.productoId === PRODUCTOS_CLAVE.GASOLINA_95_E5

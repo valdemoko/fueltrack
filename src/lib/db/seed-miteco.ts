@@ -12,8 +12,8 @@
  * 6. Fetch y upsert estaciones de Málaga (~309 estaciones)
  * 7. Mostrar resumen
  */
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import Database from "better-sqlite3";
+import { drizzle } from "drizzle-orm/libsql";
+import { createClient } from "@libsql/client";
 import * as schema from "./schema";
 import {
   ingestEstaciones,
@@ -29,13 +29,12 @@ async function main() {
 
   // Inicializar base de datos
   console.log(`[seed] Conectando a ${DB_PATH}...`);
-  const sqlite = new Database(DB_PATH);
-  const db = drizzle(sqlite, { schema });
+  const client = createClient({ url: `file:${DB_PATH}` });
+  const db = drizzle(client, { schema });
 
   // Crear tablas si no existen
   console.log("[seed] Creando tablas si no existen...");
-  sqlite.pragma("foreign_keys = OFF");
-  sqlite.exec(`
+  await client.executeMultiple(`
     CREATE TABLE IF NOT EXISTS ccaa (
       id TEXT PRIMARY KEY,
       nombre TEXT NOT NULL
@@ -108,21 +107,21 @@ async function main() {
   console.log(`[seed] ${numEstaciones} estaciones insertadas`);
 
   // Resumen final
-  const estacionesCount = db
+  const estacionesCount = await db
     .select({ count: schema.estaciones.id })
     .from(schema.estaciones)
     .all();
-  const preciosCount = db
+  const preciosCount = await db
     .select({ count: schema.precios.estacionId })
     .from(schema.precios)
     .all();
-  const productosCount = db
+  const productosCount = await db
     .select({ count: schema.productos.id })
     .from(schema.productos)
     .all();
 
   // Contar municipios únicos
-  const municipiosCount = db
+  const municipiosCount = await db
     .select({ count: schema.estaciones.municipioId })
     .from(schema.estaciones)
     .all();
@@ -138,10 +137,7 @@ async function main() {
   console.log("\n[seed] ¡Completado! Base de datos lista.");
 
   // Reactivar foreign keys
-  sqlite.pragma("foreign_keys = ON");
-
-  // Cerrar conexión
-  sqlite.close();
+  client.close();
 }
 
 main().catch((error) => {

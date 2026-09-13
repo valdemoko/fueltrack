@@ -37,7 +37,7 @@ export async function GET(request: Request) {
     }
 
     // Consultar estaciones
-    const estaciones = db
+    const estaciones = await db
       .select({
         id: schema.estaciones.id,
         rotulo: schema.estaciones.rotulo,
@@ -53,8 +53,9 @@ export async function GET(request: Request) {
       .all();
 
     // Para cada estación, obtener sus precios
-    const resultado = estaciones.map((estacion) => {
-      const precios = db
+    const resultado = await Promise.all(
+      estaciones.map(async (estacion) => {
+      const precios = await db
         .select({
           productoId: schema.precios.productoId,
           precio: schema.precios.precio,
@@ -69,11 +70,12 @@ export async function GET(request: Request) {
         .where(eq(schema.precios.estacionId, estacion.id))
         .all();
 
-      return {
-        ...estacion,
-        precios,
-      };
-    });
+        return {
+          ...estacion,
+          precios,
+        };
+      })
+    );
 
     // Filtrar por producto si se especifica
     let filtrado = resultado;
