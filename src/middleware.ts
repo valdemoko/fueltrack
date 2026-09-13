@@ -32,13 +32,16 @@ let client: ReturnType<typeof createClient> | null = null;
 
 function getCliente() {
   if (!client) {
-    const url =
-      process.env.DATABASE_URL && process.env.DATABASE_URL.startsWith("libsql://")
-        ? process.env.DATABASE_URL
-        : "file:./data/combustible.db";
+    // TURSO_DATABASE_URL (preferente) o DATABASE_URL como alias.
+    const remota =
+      process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "";
+    const url = remota.startsWith("libsql://")
+      ? remota
+      : "file:./data/combustible.db";
     client = createClient({
       url,
-      authToken: process.env.DATABASE_AUTH_TOKEN || undefined,
+      authToken:
+        process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN || undefined,
     });
   }
   return client;

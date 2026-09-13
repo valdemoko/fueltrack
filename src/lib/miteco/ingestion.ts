@@ -25,71 +25,6 @@ import {
 } from "./client";
 import { validarPrecio } from "./validacion";
 
-/**
- * Último precio válido previo de una estación por producto (fecha anterior
- * a la observación actual). Se usa para detectar saltos anómalos.
- */
-async function preciosAnteriores(
-  database: LibSQLDatabase<typeof schema>,
-  estacionId: string,
-  fechaObservacion: string
-): Promise<Map<number, number>> {
-  const filas = (await database.all(sql`
-    SELECT p.producto_id, p.precio
-    FROM precios p
-    WHERE p.estacion_id = ${estacionId}
-      AND p.precio IS NOT NULL
-      AND p.fecha_observacion = (
-        SELECT MAX(p2.fecha_observacion) FROM precios p2
-        WHERE p2.estacion_id = p.estacion_id
-          AND p2.producto_id = p.producto_id
-          AND p2.fecha_observacion < ${fechaObservacion}
-      )
-  `)) as unknown as Array<{ producto_id: number; precio: number }>;
-  return new Map(filas.map((f) => [f.producto_id, f.precio] as [number, number]));
-}
-
-/**
- * Filtra precios anómalos de una estación antes de escribir en la BD.
- * Devuelve solo los precios válidos; registra los descartados y los
- * sospechosos (aceptados pero con salto grande).
- */
-async function validarPreciosEstacion(
-  database: LibSQLDatabase<typeof schema>,
-  precios: PrecioNormalizado[],
-  fechaObservacion: string
-): Promise<{ validos: PrecioNormalizado[]; descartados: number; sospechosos: number }> {
-  const previos = await preciosAnteriores(database, precios[0]?.estacionId ?? "", fechaObservacion);
-  const validos: PrecioNormalizado[] = [];
-  let descartados = 0;
-  let sospechosos = 0;
-
-  for (const precio of precios) {
-    if (precio.precio === null) {
-      validos.push(precio); // sin dato: flujo normal (no se guarda)
-      continue;
-    }
-    const previo = previos.get(precio.productoId) ?? null;
-    const resultado = validarPrecio(precio.precio, precio.productoId, previo);
-    if (!resultado.valido) {
-      descartados++;
-      console.warn(
-        `[ingest] Precio descartado ${precio.estacionId}/prod ${precio.productoId}: ${resultado.motivo}`
-      );
-      continue;
-    }
-    if (resultado.sospechoso) {
-      sospechosos++;
-      console.warn(
-        `[ingest] Precio sospechoso (guardado) ${precio.estacionId}/prod ${precio.productoId}: ${resultado.motivo}`
-      );
-    }
-    validos.push(precio);
-  }
-
-  return { validos, descartados, sospechosos };
-}
-
 // ─── Normalización ──────────────────────────────────────────────────────────
 
 /**
@@ -203,6 +138,89 @@ export function extraerPrecios(
 // ─── Ingestión en base de datos ─────────────────────────────────────────────
 
 /**
+ * Upsert de estaciones en un lote (una sola llamada a la BD).
+ */
+async function upsertEstacionesLote(
+  database: LibSQLDatabase<typeof schema>,
+  estaciones: EstacionNormalizada[]
+): Promise<void> {
+  if (estaciones.length === 0) return;
+  await database
+    .insert(schema.estaciones)
+    .values(
+      estaciones.map((estacion) => ({
+        id: estacion.id,
+        municipioId: estacion.municipioId,
+        provinciaId: estacion.provinciaId,
+        ccaaId: estacion.ccaaId,
+        rotulo: estacion.rotulo,
+        direccion: estacion.direccion,
+        localidad: estacion.localidad,
+        codigoPostal: estacion.codigoPostal,
+        latitud: estacion.latitud,
+        longitud: estacion.longitud,
+        horario: estacion.horario,
+        margen: estacion.margen,
+        tipoVenta: estacion.tipoVenta,
+        bioetanolPct: estacion.bioetanolPct,
+        esterMetilicoPct: estacion.esterMetilicoPct,
+        fechaActualizacion: estacion.fechaActualizacion,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: schema.estaciones.id,
+      set: {
+        rotulo: sql`excluded.rotulo`,
+        direccion: sql`excluded.direccion`,
+        localidad: sql`excluded.localidad`,
+        codigoPostal: sql`excluded.codigo_postal`,
+        latitud: sql`excluded.latitud`,
+        longitud: sql`excluded.longitud`,
+        horario: sql`excluded.horario`,
+        margen: sql`excluded.margen`,
+        tipoVenta: sql`excluded.tipo_venta`,
+        bioetanolPct: sql`excluded.bioetanol_pct`,
+        esterMetilicoPct: sql`excluded.ester_metilico_pct`,
+        fechaActualizacion: sql`excluded.fecha_actualizacion`,
+      },
+    })
+    .run();
+}
+
+/**
+ * Upsert de precios en un lote (una sola llamada a la BD).
+ * INSERT ... ON CONFLICT DO UPDATE (idempotente, re-ejecutable).
+ */
+async function upsertPreciosLote(
+  database: LibSQLDatabase<typeof schema>,
+  precios: PrecioNormalizado[]
+): Promise<void> {
+  const conPrecio = precios.filter((p) => p.precio !== null);
+  if (conPrecio.length === 0) return;
+  await database
+    .insert(schema.precios)
+    .values(
+      conPrecio.map((precio) => ({
+        estacionId: precio.estacionId,
+        productoId: precio.productoId,
+        fechaObservacion: precio.fechaObservacion,
+        precio: precio.precio,
+      }))
+    )
+    .onConflictDoUpdate({
+      target: [
+        schema.precios.estacionId,
+        schema.precios.productoId,
+        schema.precios.fechaObservacion,
+      ],
+      set: {
+        precio: sql`excluded.precio`,
+      },
+    })
+    .run();
+}
+
+/**
  * Ingesta las estaciones de una provincia con sus precios actuales.
  * Realiza upsert por IDEESS.
  *
@@ -224,82 +242,83 @@ export async function ingestEstaciones(
     `[ingest] Fecha de consulta: ${fechaConsulta}, estaciones: ${response.ListaEESSPrecio.length}`
   );
 
-  // Normalizar y upsert estaciones
-  for (const raw of response.ListaEESSPrecio) {
-    const estacion = normalizarEstacion(raw, fechaConsulta);
-    if (!estacion) continue; // Saltar estaciones sin coordenadas
+  // Normalizar todas las estaciones primero (saltar las sin coordenadas)
+  const estaciones = response.ListaEESSPrecio
+    .map((raw) => normalizarEstacion(raw, fechaConsulta))
+    .filter((e): e is EstacionNormalizada => e !== null);
 
-    // Upsert estación
-    await db.insert(schema.estaciones)
-      .values({
-        id: estacion.id,
-        municipioId: estacion.municipioId,
-        provinciaId: estacion.provinciaId,
-        ccaaId: estacion.ccaaId,
-        rotulo: estacion.rotulo,
-        direccion: estacion.direccion,
-        localidad: estacion.localidad,
-        codigoPostal: estacion.codigoPostal,
-        latitud: estacion.latitud,
-        longitud: estacion.longitud,
-        horario: estacion.horario,
-        margen: estacion.margen,
-        tipoVenta: estacion.tipoVenta,
-        bioetanolPct: estacion.bioetanolPct,
-        esterMetilicoPct: estacion.esterMetilicoPct,
-        fechaActualizacion: estacion.fechaActualizacion,
-      })
-      .onConflictDoUpdate({
-        target: schema.estaciones.id,
-        set: {
-          rotulo: estacion.rotulo,
-          direccion: estacion.direccion,
-          localidad: estacion.localidad,
-          codigoPostal: estacion.codigoPostal,
-          latitud: estacion.latitud,
-          longitud: estacion.longitud,
-          horario: estacion.horario,
-          margen: estacion.margen,
-          tipoVenta: estacion.tipoVenta,
-          bioetanolPct: estacion.bioetanolPct,
-          esterMetilicoPct: estacion.esterMetilicoPct,
-          fechaActualizacion: estacion.fechaActualizacion,
-        },
-      })
-      .run();
+  // Upsert de estaciones en un solo lote (redondo único a la BD)
+  await upsertEstacionesLote(db, estaciones);
 
-    // Extraer, validar e insertar precios
-    const preciosBrutos = extraerPrecios(raw, fechaConsulta);
-    const { validos } = await validarPreciosEstacion(db, preciosBrutos, fechaConsulta);
-    for (const precio of validos) {
-      // Solo insertar si hay precio
-      if (precio.precio !== null) {
-        await db.insert(schema.precios)
-          .values({
-            estacionId: precio.estacionId,
-            productoId: precio.productoId,
-            fechaObservacion: precio.fechaObservacion,
-            precio: precio.precio,
-          })
-          .onConflictDoUpdate({
-            target: [
-              schema.precios.estacionId,
-              schema.precios.productoId,
-              schema.precios.fechaObservacion,
-            ],
-            set: {
-              precio: precio.precio,
-            },
-          })
-          .run();
-      }
-    }
-  }
+  // Precios: normalizar todo el lote y validar de una vez (1 consulta
+  // previa para traer los últimos precios de TODAS las estaciones de la
+  // provincia, en lugar de una por estación). Así la ingesta entera cabe
+  // en el límite de 60 s de Vercel Hobby.
+  const rawPorId = new Map(
+    response.ListaEESSPrecio.map((r) => [r.IDEESS, r] as [string, MitecoEstacionRaw])
+  );
+  const preciosBrutos = estaciones.flatMap((e) =>
+    extraerPrecios(rawPorId.get(e.id) as MitecoEstacionRaw, fechaConsulta)
+  );
+  const { validos } = await validarLote(db, preciosBrutos, fechaConsulta);
+  await upsertPreciosLote(db, validos);
 
   console.log(
-    `[ingest] Ingestión completada: ${response.ListaEESSPrecio.length} estaciones`
+    `[ingest] Ingestión completada: ${estaciones.length} estaciones`
   );
-  return response.ListaEESSPrecio.length;
+  return estaciones.length;
+}
+
+/**
+ * Valida un lote de precios contra los últimos precios válidos previos.
+ * Usa una única consulta previa por lote (no una por estación).
+ */
+async function validarLote(
+  database: LibSQLDatabase<typeof schema>,
+  precios: PrecioNormalizado[],
+  fechaObservacion: string
+): Promise<{ validos: PrecioNormalizado[] }> {
+  const estacionIds = [...new Set(precios.map((p) => p.estacionId))];
+  if (estacionIds.length === 0) return { validos: precios };
+
+  // Último precio válido previo por (estación, producto) en una sola query:
+  // fecha máxima anterior a la observación actual.
+  const filas = (await database.all(sql`
+    SELECT estacion_id, producto_id, precio
+    FROM precios p
+    WHERE p.fecha_observacion = (
+      SELECT MAX(p2.fecha_observacion) FROM precios p2
+      WHERE p2.estacion_id = p.estacion_id
+        AND p2.producto_id = p.producto_id
+        AND p2.fecha_observacion < ${fechaObservacion}
+    )
+      AND p.precio IS NOT NULL
+      AND p.estacion_id IN (${sql.join(estacionIds.map((id) => sql`${id}`), sql`, `)})
+  `)) as unknown as Array<{ estacion_id: string; producto_id: number; precio: number }>;
+
+  const previos = new Map(
+    filas.map((f) => [`${f.estacion_id}:${f.producto_id}`, f.precio] as [string, number])
+  );
+
+  const validos: PrecioNormalizado[] = [];
+  for (const precio of precios) {
+    if (precio.precio === null) continue; // sin dato: no se guarda
+    const previo = previos.get(`${precio.estacionId}:${precio.productoId}`) ?? null;
+    const resultado = validarPrecio(precio.precio, precio.productoId, previo);
+    if (!resultado.valido) {
+      console.warn(
+        `[ingest] Precio descartado ${precio.estacionId}/prod ${precio.productoId}: ${resultado.motivo}`
+      );
+      continue;
+    }
+    if (resultado.sospechoso) {
+      console.warn(
+        `[ingest] Precio sospechoso (guardado) ${precio.estacionId}/prod ${precio.productoId}: ${resultado.motivo}`
+      )
+    }
+    validos.push(precio);
+  }
+  return { validos };
 }
 
 /**
@@ -322,81 +341,26 @@ export async function ingestHistorico(
     `[ingest] Histórico ${fecha}: ${response.ListaEESSPrecio.length} estaciones`
   );
 
-  // Normalizar y upsert estaciones
-  for (const raw of response.ListaEESSPrecio) {
-    const estacion = normalizarEstacion(raw, response.Fecha);
-    if (!estacion) continue; // Saltar estaciones sin coordenadas
+  // Normalizar y upsert estaciones en lote (mismos helpers que ingestEstaciones)
+  const estaciones = response.ListaEESSPrecio
+    .map((raw) => normalizarEstacion(raw, response.Fecha))
+    .filter((e): e is EstacionNormalizada => e !== null);
 
-    // Upsert estación (misma lógica que ingestEstaciones)
-    await db.insert(schema.estaciones)
-      .values({
-        id: estacion.id,
-        municipioId: estacion.municipioId,
-        provinciaId: estacion.provinciaId,
-        ccaaId: estacion.ccaaId,
-        rotulo: estacion.rotulo,
-        direccion: estacion.direccion,
-        localidad: estacion.localidad,
-        codigoPostal: estacion.codigoPostal,
-        latitud: estacion.latitud,
-        longitud: estacion.longitud,
-        horario: estacion.horario,
-        margen: estacion.margen,
-        tipoVenta: estacion.tipoVenta,
-        bioetanolPct: estacion.bioetanolPct,
-        esterMetilicoPct: estacion.esterMetilicoPct,
-        fechaActualizacion: estacion.fechaActualizacion,
-      })
-      .onConflictDoUpdate({
-        target: schema.estaciones.id,
-        set: {
-          rotulo: estacion.rotulo,
-          direccion: estacion.direccion,
-          localidad: estacion.localidad,
-          codigoPostal: estacion.codigoPostal,
-          latitud: estacion.latitud,
-          longitud: estacion.longitud,
-          horario: estacion.horario,
-          margen: estacion.margen,
-          tipoVenta: estacion.tipoVenta,
-          bioetanolPct: estacion.bioetanolPct,
-          esterMetilicoPct: estacion.esterMetilicoPct,
-          fechaActualizacion: estacion.fechaActualizacion,
-        },
-      })
-      .run();
+  await upsertEstacionesLote(db, estaciones);
 
-    // Extraer, validar e insertar precios históricos
-    const preciosBrutos = extraerPrecios(raw, fechaObservacion);
-    const { validos } = await validarPreciosEstacion(db, preciosBrutos, fechaObservacion);
-    for (const precio of validos) {
-      if (precio.precio !== null) {
-        await db.insert(schema.precios)
-          .values({
-            estacionId: precio.estacionId,
-            productoId: precio.productoId,
-            fechaObservacion: precio.fechaObservacion,
-            precio: precio.precio,
-          })
-          .onConflictDoUpdate({
-            target: [
-              schema.precios.estacionId,
-              schema.precios.productoId,
-              schema.precios.fechaObservacion,
-            ],
-            set: {
-              precio: precio.precio,
-            },
-          })
-          .run();
-      }
-    }
-  }
+  const rawPorId = new Map(
+    response.ListaEESSPrecio.map((r) => [r.IDEESS, r] as [string, MitecoEstacionRaw])
+  );
+  const preciosBrutos = estaciones.flatMap((e) =>
+    extraerPrecios(rawPorId.get(e.id) as MitecoEstacionRaw, fechaObservacion)
+  );
+  const { validos } = await validarLote(db, preciosBrutos, fechaObservacion);
+  await upsertPreciosLote(db, validos);
 
   console.log(
-    `[ingest] Histórico completado: ${response.ListaEESSPrecio.length} estaciones`
+    `[ingest] Histórico completado: ${estaciones.length} estaciones`
   );
-  return response.ListaEESSPrecio.length;
+  return estaciones.length;
 }
 
 /**

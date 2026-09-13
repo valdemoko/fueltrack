@@ -18,7 +18,7 @@ export async function GET(
 
   try {
     // Buscar estación
-    const estacion = db
+    const estacion = await db
       .select()
       .from(schema.estaciones)
       .where(eq(schema.estaciones.id, id))

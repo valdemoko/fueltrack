@@ -15,8 +15,11 @@ import { createClient, type Client } from "@libsql/client";
 import { sql, type SQL } from "drizzle-orm";
 import * as schema from "./schema";
 
-const DATABASE_URL = process.env.DATABASE_URL || "";
-const DATABASE_AUTH_TOKEN = process.env.DATABASE_AUTH_TOKEN || "";
+/** URL de Turso: acepta TURSO_DATABASE_URL y el alias clásico DATABASE_URL. */
+const DATABASE_URL = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "";
+/** Token de Turso: acepta TURSO_AUTH_TOKEN y el alias clásico DATABASE_AUTH_TOKEN. */
+const DATABASE_AUTH_TOKEN =
+  process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN || "";
 /** Modo forzado local para scripts CLI: DB_LOCAL=1 */
 const FORCE_LOCAL = process.env.DB_LOCAL === "1";
 
@@ -25,9 +28,21 @@ const url = !FORCE_LOCAL && isRemote ? DATABASE_URL : "file:./data/combustible.d
 
 export const isTurso = !FORCE_LOCAL && isRemote;
 
+// El cliente libSQL admite credenciales embebidas en la URL (file:...?authToken=...) y
+// la opción authToken (para libsql://). Se resuelven ambas para máxima compatibilidad.
+function parseUrlCreds(u: string): { url: string; token?: string } {
+  const m = u.match(/^(.*?)(?:\?authToken=(.*))?$/);
+  if (!m) return { url: u };
+  return { url: m[1], token: m[2] || undefined };
+}
+
+const { url: cleanUrl, token: urlToken } = parseUrlCreds(url);
+
 const client: Client = createClient({
-  url,
-  authToken: isRemote ? DATABASE_AUTH_TOKEN || undefined : undefined,
+  url: cleanUrl,
+  authToken: isRemote
+    ? DATABASE_AUTH_TOKEN || urlToken || undefined
+    : urlToken || undefined,
 });
 
 /** Instancia Drizzle del driver libSQL (async). */
