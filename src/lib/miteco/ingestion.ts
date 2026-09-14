@@ -189,7 +189,13 @@ async function upsertEstacionesLote(
 
 /**
  * Upsert de precios en un lote (una sola llamada a la BD).
- * INSERT ... ON CONFLICT DO UPDATE (idempotente, re-ejecutable).
+ *
+ * Arquitectura de cuotas — doble escritura idempotente:
+ *  1. `precios`: fila única (estación, producto) con el precio ACTUAL.
+ *     Re-ejecutar el mismo día NO crea filas nuevas (ON CONFLICT UPDATE).
+ *  2. `precios_historico`: observación diaria dentro de la ventana corta.
+ *     PK (estación, producto, fecha) → idempotente; el mantenimiento
+ *     diario borra lo que sale de la ventana.
  */
 async function upsertPreciosLote(
   database: LibSQLDatabase<typeof schema>,
@@ -197,6 +203,7 @@ async function upsertPreciosLote(
 ): Promise<void> {
   const conPrecio = precios.filter((p) => p.precio !== null);
   if (conPrecio.length === 0) return;
+
   await database
     .insert(schema.precios)
     .values(
@@ -208,10 +215,29 @@ async function upsertPreciosLote(
       }))
     )
     .onConflictDoUpdate({
+      target: [schema.precios.estacionId, schema.precios.productoId],
+      set: {
+        precio: sql`excluded.precio`,
+        fechaObservacion: sql`excluded.fecha_observacion`,
+      },
+    })
+    .run();
+
+  await database
+    .insert(schema.preciosHistorico)
+    .values(
+      conPrecio.map((precio) => ({
+        estacionId: precio.estacionId,
+        productoId: precio.productoId,
+        fecha: precio.fechaObservacion,
+        precio: precio.precio,
+      }))
+    )
+    .onConflictDoUpdate({
       target: [
-        schema.precios.estacionId,
-        schema.precios.productoId,
-        schema.precios.fechaObservacion,
+        schema.preciosHistorico.estacionId,
+        schema.preciosHistorico.productoId,
+        schema.preciosHistorico.fecha,
       ],
       set: {
         precio: sql`excluded.precio`,

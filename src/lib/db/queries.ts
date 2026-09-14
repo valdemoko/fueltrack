@@ -9,13 +9,22 @@
 import { eq, sql, and, ne, type SQL } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "./schema";
+import {
+  cacheada,
+  REVALIDATE_PRECIOS,
+  REVALIDATE_HISTORICO,
+  REVALIDATE_ESTRUCTURA,
+} from "./cache";
 
 /** SELECT genérico tipado contra el driver async (equivale al antiguo db.all síncrono). */
 function all<T>(q: SQL): Promise<T[]> {
   return db.all(q) as unknown as Promise<T[]>;
 }
 
-/** Última fecha de observación disponible para un producto. */
+/**
+ * Fecha de la última observación válida de un producto.
+ * Con la arquitectura "precios actuales" es un seek por índice sobre ≤43k filas.
+ */
 export async function getUltimaFechaProducto(productoId: number): Promise<string | null> {
   const row = await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
@@ -74,9 +83,23 @@ export async function getResumenProducto(
   productoId: number,
   ambito: AmbitoGeografico = {}
 ): Promise<ResumenProducto | null> {
+  const claveAmbito =
+    ambito.municipioId ?? ambito.provinciaId ?? ambito.ccaaId ?? "es";
+  return cacheada(
+    () => resumenProductoInterna(productoId, ambito),
+    ["resumen-prod", String(productoId), claveAmbito],
+    REVALIDATE_PRECIOS
+  );
+}
+
+async function resumenProductoInterna(
+  productoId: number,
+  ambito: AmbitoGeografico
+): Promise<ResumenProducto | null> {
   const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return null;
 
+  // `precios` = solo precios actuales: no hace falta filtrar por fecha exacta
   const row = await all<{
     producto_id: number;
     nombre: string;
@@ -98,7 +121,6 @@ export async function getResumenProducto(
       JOIN productos p ON p.id = pr.producto_id
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE pr.producto_id = ${productoId}
-        AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
         AND ${condicionesAmbito(ambito)}
       GROUP BY pr.producto_id, p.nombre, p.abreviatura
@@ -146,9 +168,17 @@ export async function getMunicipiosDeProvincia(
   provinciaId: string,
   productoId: number
 ): Promise<MunicipioStats[]> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return [];
+  return cacheada(
+    () => municipiosDeProvinciaInterna(provinciaId, productoId),
+    ["municipios-prov", provinciaId, String(productoId)],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function municipiosDeProvinciaInterna(
+  provinciaId: string,
+  productoId: number
+): Promise<MunicipioStats[]> {
   const filas = await all<{
     municipio_id: string;
     municipio_nombre: string;
@@ -169,7 +199,7 @@ export async function getMunicipiosDeProvincia(
       LEFT JOIN precios pr
         ON pr.estacion_id = e.id
         AND pr.producto_id = ${productoId}
-        AND pr.fecha_observacion = ${fecha}
+        AND pr.precio IS NOT NULL
       WHERE m.provincia_id = ${provinciaId}
       GROUP BY m.id, m.nombre
       HAVING total_estaciones > 0
@@ -203,9 +233,18 @@ export async function getEstacionesDeMunicipio(
   productoId: number,
   limite = 200
 ): Promise<EstacionConPrecio[]> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return [];
+  return cacheada(
+    () => estacionesDeMunicipioInterna(municipioId, productoId, limite),
+    ["est-mun", municipioId, String(productoId), String(limite)],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function estacionesDeMunicipioInterna(
+  municipioId: string,
+  productoId: number,
+  limite: number
+): Promise<EstacionConPrecio[]> {
   const filas = await all<{
     id: string;
     rotulo: string | null;
@@ -225,7 +264,7 @@ export async function getEstacionesDeMunicipio(
           FROM precios pr
           WHERE pr.estacion_id = e.id
             AND pr.producto_id = ${productoId}
-            AND pr.fecha_observacion = ${fecha}
+            AND pr.precio IS NOT NULL
           LIMIT 1
         ) AS precio
       FROM estaciones e
@@ -249,9 +288,18 @@ export async function getEstacionesDeProvincia(
   productoId: number,
   limite = 50
 ): Promise<EstacionConPrecio[]> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return [];
+  return cacheada(
+    () => estacionesDeProvinciaInterna(provinciaId, productoId, limite),
+    ["est-prov", provinciaId, String(productoId), String(limite)],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function estacionesDeProvinciaInterna(
+  provinciaId: string,
+  productoId: number,
+  limite: number
+): Promise<EstacionConPrecio[]> {
   const filas = await all<{
     id: string;
     rotulo: string | null;
@@ -271,7 +319,7 @@ export async function getEstacionesDeProvincia(
           FROM precios pr
           WHERE pr.estacion_id = e.id
             AND pr.producto_id = ${productoId}
-            AND pr.fecha_observacion = ${fecha}
+            AND pr.precio IS NOT NULL
           LIMIT 1
         ) AS precio
       FROM estaciones e
@@ -309,20 +357,52 @@ export async function getResumenHistoricoEstacion(
   productoId: number,
   dias = 30
 ): Promise<ResumenHistorico | null> {
+  return cacheada(
+    () => resumenHistoricoEstacionInterna(estacionId, productoId, dias),
+    ["hist-est", estacionId, String(productoId), String(dias)],
+    REVALIDATE_HISTORICO
+  );
+}
+
+async function resumenHistoricoEstacionInterna(
+  estacionId: string,
+  productoId: number,
+  dias: number
+): Promise<ResumenHistorico | null> {
   const desde = new Date(Date.now() - dias * 86400000)
     .toISOString()
     .slice(0, 10);
 
-  const filas = await all<{ fecha_observacion: string; precio: number }>(sql`
-      SELECT fecha_observacion, precio
-      FROM precios
+  // Ventana corta (≤30 días): histórico detallado de la estación
+  if (dias <= 30) {
+    const filas = await all<{ fecha_observacion: string; precio: number }>(sql`
+      SELECT fecha AS fecha_observacion, precio
+      FROM precios_historico
       WHERE estacion_id = ${estacionId}
         AND producto_id = ${productoId}
-        AND fecha_observacion >= ${desde}
+        AND fecha >= ${desde}
         AND precio IS NOT NULL
-      ORDER BY fecha_observacion ASC
+      ORDER BY fecha ASC
     `);
+    return resumenDesdeFilas(filas);
+  }
 
+  // Ventana larga: serie mensual permanente de la estación
+  const mesDesde = desde.slice(0, 7);
+  const filas = await all<{ fecha_observacion: string; precio: number }>(sql`
+      SELECT mes || '-15' AS fecha_observacion, precio_medio AS precio
+      FROM hist_estacion_mes
+      WHERE estacion_id = ${estacionId}
+        AND producto_id = ${productoId}
+        AND mes >= ${mesDesde}
+      ORDER BY mes ASC
+    `);
+  return resumenDesdeFilas(filas);
+}
+
+function resumenDesdeFilas(
+  filas: Array<{ fecha_observacion: string; precio: number }>
+): ResumenHistorico | null {
   if (filas.length === 0) return null;
 
   const precios = filas.map((f) => f.precio);
@@ -566,6 +646,7 @@ export interface PrecioProducto {
 export async function getPreciosActualesEstacion(
   estacionId: string
 ): Promise<PrecioProducto[]> {
+  // `precios` = actuales: 1 fila por estación×producto, sin subqueries
   const filas = await all<{
     producto_id: number;
     precio: number | null;
@@ -578,10 +659,6 @@ export async function getPreciosActualesEstacion(
       FROM precios pr
       JOIN productos p ON p.id = pr.producto_id
       WHERE pr.estacion_id = ${estacionId}
-        AND pr.fecha_observacion = (
-          SELECT MAX(fecha_observacion) FROM precios
-          WHERE estacion_id = pr.estacion_id AND producto_id = pr.producto_id
-        )
     `);
   return filas.map((f) => ({
     productoId: f.producto_id,
@@ -607,9 +684,17 @@ export async function getComparativaZona(
   municipioId: string,
   productoId: number
 ): Promise<ComparativaZona | null> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return null;
+  return cacheada(
+    () => comparativaZonaInterna(municipioId, productoId),
+    ["comparativa", municipioId, String(productoId)],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function comparativaZonaInterna(
+  municipioId: string,
+  productoId: number
+): Promise<ComparativaZona | null> {
   const row = await all<{
     precio_medio: number | null;
     precio_min: number | null;
@@ -625,7 +710,6 @@ export async function getComparativaZona(
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE e.municipio_id = ${municipioId}
         AND pr.producto_id = ${productoId}
-        AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
     `);
 
@@ -661,9 +745,24 @@ export async function getEstacionesCercanas(
   radioKm = 10,
   limite = 8
 ): Promise<EstacionCercana[]> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return [];
+  return cacheada(
+    () =>
+      estacionesCercanasInterna(
+        estacionId, latitud, longitud, productoId, radioKm, limite
+      ),
+    ["cercanas", estacionId, String(productoId), String(radioKm)],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function estacionesCercanasInterna(
+  estacionId: string,
+  latitud: number,
+  longitud: number,
+  productoId: number,
+  radioKm: number,
+  limite: number
+): Promise<EstacionCercana[]> {
   // Aproximación del bounding box: 1 grado lat ≈ 111 km; lon ≈ 111·cos(lat)
   const dLat = radioKm / 111;
   const dLon = radioKm / (111 * Math.cos((latitud * Math.PI) / 180) || 1);
@@ -696,7 +795,7 @@ export async function getEstacionesCercanas(
             FROM precios pr
             WHERE pr.estacion_id = e.id
               AND pr.producto_id = ${productoId}
-              AND pr.fecha_observacion = ${fecha}
+              AND pr.precio IS NOT NULL
             LIMIT 1
           ) AS precio
         FROM estaciones e
@@ -789,9 +888,20 @@ export async function getEstacionesBaratas(
   limite = 10,
   ambito: AmbitoGeografico = {}
 ): Promise<EstacionConPrecio[]> {
-  const fecha = await getUltimaFechaProducto(productoId);
-  if (!fecha) return [];
+  const claveAmbito =
+    ambito.municipioId ?? ambito.provinciaId ?? ambito.ccaaId ?? "es";
+  return cacheada(
+    () => estacionesBaratasInterna(productoId, limite, ambito),
+    ["baratas", String(productoId), String(limite), claveAmbito],
+    REVALIDATE_PRECIOS
+  );
+}
 
+async function estacionesBaratasInterna(
+  productoId: number,
+  limite: number,
+  ambito: AmbitoGeografico
+): Promise<EstacionConPrecio[]> {
   const filas = await all<{
     id: string;
     rotulo: string | null;
@@ -810,7 +920,6 @@ export async function getEstacionesBaratas(
       FROM precios pr
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE pr.producto_id = ${productoId}
-        AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
         AND ${condicionesAmbito(ambito)}
       ORDER BY pr.precio ASC

@@ -1,43 +1,51 @@
 /**
  * Consultas orientadas a SEO y selección de combustible.
  *
- * Complementan queries.ts con:
- *  - Cobertura real de productos en un ámbito (para el selector de combustible)
- *  - Estaciones de un municipio por producto (selector + listado)
- *  - Municipios cercanos (enlazado interno)
- *  - Resumen histórico agregado de un ámbito (históricos indexables)
+ * ARQUITECTURA OPTIMIZADA PARA CUOTAS (Turso Free):
+ *  - `precios` = SOLO precios actuales (1 fila estación×producto).
+ *    Consultarla es barato: cualquier agregado toca ≤43k filas.
+ *  - `precios_historico` = ventana corta (~32 días) para gráficas 1m.
+ *  - `hist_geo_dia` = medias diarias mun/prov/ccaa/nac (~95 días).
+ *  - `hist_*_mes` = medias mensuales permanentes (gráficas 6m/1a/2a).
  *
- * Reglas de rendimiento (BD ~30M observaciones):
- *  - NUNCA escanear toda la tabla `precios`: siempre filtrar por
- *    (producto_id, fecha_observacion), que usa idx_precios_producto_fecha.
- *  - Las fechas máximas por producto se resuelven con seeks individuales
- *    (O(log n) por producto), no con GROUP BY global ni subqueries
- *    correlacionadas sobre 30M filas.
- *
- * Solo datos reales de la BD. Sin interpolaciones ni estimaciones.
+ * Regla de cuota: NUNCA escanear `precios` sin filtro de clave; NUNCA
+ * recalcular agregados históricos en tiempo real (leer las tablas hist_*).
+ * Todas las funciones van cacheadas: N requests → ≤1 lectura real.
  */
 import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
+import {
+  cacheada,
+  REVALIDATE_PRECIOS,
+  REVALIDATE_HISTORICO,
+  REVALIDATE_ESTRUCTURA,
+} from "./cache";
 import { slugify } from "@/lib/geografia";
 
 // ─── Fechas de referencia por producto ─────────────────────────────────────
 
 /** Mapa productoId → última fecha de observación (1 seek por producto). */
 export async function getUltimasFechasProductos(): Promise<Map<number, string>> {
-  const productos = (await db.all(
-    sql`SELECT id FROM productos WHERE EXISTS (
+  return cacheada(
+    async () => {
+      const productos = (await db.all(
+        sql`SELECT id FROM productos WHERE EXISTS (
           SELECT 1 FROM precios WHERE precios.producto_id = productos.id
         )`
-  )) as unknown as Array<{ id: number }>;
+      )) as unknown as Array<{ id: number }>;
 
-  const mapa = new Map<number, string>();
-  for (const p of productos) {
-    const row = (await db.get(
-      sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
-    )) as unknown as { fecha: string } | undefined;
-    if (row?.fecha) mapa.set(p.id, row.fecha);
-  }
-  return mapa;
+      const mapa = new Map<number, string>();
+      for (const p of productos) {
+        const row = (await db.get(
+          sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
+        )) as unknown as { fecha: string } | undefined;
+        if (row?.fecha) mapa.set(p.id, row.fecha);
+      }
+      return mapa;
+    },
+    ["fechas-productos"],
+    REVALIDATE_PRECIOS
+  );
 }
 
 // ─── Cobertura de productos en un ámbito ────────────────────────────────────
@@ -57,10 +65,27 @@ export interface CoberturaProducto {
  * Productos con cobertura real (≥ minEstaciones estaciones con precio) en un
  * ámbito geográfico, ordenados por número de estaciones descendente.
  * Si no se indica ámbito, calcula sobre toda la BD.
+ * Coste: ≤43k filas actuales por producto; cacheado 15 min.
  */
 export async function getCoberturaProductos(
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {},
   minEstaciones = 1
+): Promise<CoberturaProducto[]> {
+  const claveAmbito =
+    ambito.municipioId ??
+    ambito.provinciaId ??
+    ambito.ccaaId ??
+    "es";
+  return cacheada(
+    () => coberturaProductosInterna(ambito, minEstaciones),
+    ["cobertura", claveAmbito, String(minEstaciones)],
+    REVALIDATE_PRECIOS
+  );
+}
+
+async function coberturaProductosInterna(
+  ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string },
+  minEstaciones: number
 ): Promise<CoberturaProducto[]> {
   const productos = (await db.all(
     sql`SELECT id, nombre, abreviatura FROM productos WHERE EXISTS (
@@ -78,7 +103,7 @@ export async function getCoberturaProductos(
     if (!fechaRow?.fecha) continue;
     const fecha = fechaRow.fecha;
 
-    // Agregado del ámbito, acotado por (producto, fecha) → índice
+    // Agregado del ámbito sobre precios ACTUALES (tabla pequeña)
     const filtroAmbito = ambito.municipioId
       ? sql`AND e.municipio_id = ${ambito.municipioId}`
       : ambito.provinciaId
@@ -93,7 +118,6 @@ export async function getCoberturaProductos(
       FROM precios pr
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE pr.producto_id = ${producto.id}
-        AND pr.fecha_observacion = ${fecha}
         AND pr.precio IS NOT NULL
         ${filtroAmbito}
     `)) as unknown as { con_precio: number; precio_medio: number | null } | undefined;
@@ -125,29 +149,28 @@ export interface EstacionMunicipioProducto {
   localidad: string;
   municipioNombre: string;
   precio: number | null;
-  /** Fecha de la última observación del producto con precio de esta estación */
+  /** Fecha del último precio de esta estación (control de obsoletos) */
   fechaUltimoPrecio: string | null;
-  /** Fecha de la última observación del producto en todo el país */
+  /** Fecha de referencia nacional del producto */
   fechaReferencia: string | null;
 }
 
 /**
- * Estaciones de un municipio con el precio del producto indicado
- * (última observación disponible del producto), ordenadas por precio.
- * Las estaciones cuyo último dato es anterior a la referencia nacional
- * quedan marcadas mediante fechaUltimoPrecio (control de obsoletos).
+ * Estaciones de un municipio con el precio ACTUAL del producto indicado,
+ * ordenadas por precio. Coste: solo las estaciones del municipio.
  */
 export async function getEstacionesMunicipioProducto(
   municipioId: string,
   productoId: number
 ): Promise<EstacionMunicipioProducto[]> {
-  // Fecha de referencia nacional del producto (1 seek)
-  const refRow = (await db.get(
-    sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${productoId}`
-  )) as unknown as { fecha: string } | undefined;
-  const fechaReferencia = refRow?.fecha ?? null;
+  return cacheada(
+    async () => {
+      const refRow = (await db.get(
+        sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${productoId}`
+      )) as unknown as { fecha: string } | undefined;
+      const fechaReferencia = refRow?.fecha ?? null;
 
-  const filas = (await db.all(sql`
+      const filas = (await db.all(sql`
     SELECT
       e.id, e.rotulo, e.direccion, e.localidad,
       m.nombre AS municipio_nombre,
@@ -159,32 +182,32 @@ export async function getEstacionesMunicipioProducto(
       ON pr.estacion_id = e.id
       AND pr.producto_id = ${productoId}
       AND pr.precio IS NOT NULL
-      AND pr.fecha_observacion = (
-        SELECT MAX(p3.fecha_observacion) FROM precios p3
-        WHERE p3.estacion_id = e.id AND p3.producto_id = ${productoId}
-      )
     WHERE e.municipio_id = ${municipioId}
     ORDER BY pr.precio IS NULL, pr.precio ASC, e.localidad ASC, e.id ASC
   `) as unknown as Array<{
-    id: string;
-    rotulo: string | null;
-    direccion: string;
-    localidad: string;
-    municipio_nombre: string;
-    precio: number | null;
-    fecha_ultimo_precio: string | null;
-  }>);
+        id: string;
+        rotulo: string | null;
+        direccion: string;
+        localidad: string;
+        municipio_nombre: string;
+        precio: number | null;
+        fecha_ultimo_precio: string | null;
+      }>);
 
-  return filas.map((f) => ({
-    id: f.id,
-    rotulo: f.rotulo,
-    direccion: f.direccion,
-    localidad: f.localidad,
-    municipioNombre: f.municipio_nombre,
-    precio: f.precio,
-    fechaUltimoPrecio: f.fecha_ultimo_precio,
-    fechaReferencia,
-  }));
+      return filas.map((f) => ({
+        id: f.id,
+        rotulo: f.rotulo,
+        direccion: f.direccion,
+        localidad: f.localidad,
+        municipioNombre: f.municipio_nombre,
+        precio: f.precio,
+        fechaUltimoPrecio: f.fecha_ultimo_precio,
+        fechaReferencia,
+      }));
+    },
+    ["est-mun-prod", municipioId, String(productoId)],
+    REVALIDATE_PRECIOS
+  );
 }
 
 // ─── Municipios cercanos (enlazado interno) ────────────────────────────────
@@ -204,6 +227,18 @@ export async function getMunicipiosCercanos(
   municipioId: string,
   limite = 8,
   radioKm = 30
+): Promise<MunicipioCercano[]> {
+  return cacheada(
+    () => municipiosCercanosInterna(municipioId, limite, radioKm),
+    ["muni-cercanos", municipioId, String(limite), String(radioKm)],
+    REVALIDATE_ESTRUCTURA
+  );
+}
+
+async function municipiosCercanosInterna(
+  municipioId: string,
+  limite: number,
+  radioKm: number
 ): Promise<MunicipioCercano[]> {
   const centro = (await db.all(sql`
     SELECT m.id, m.nombre, p.ccaa_id, p.id AS provincia_id,
@@ -228,7 +263,6 @@ export async function getMunicipiosCercanos(
   const cos = Math.cos((c.lat * Math.PI) / 180) || 1;
   const dLon = radioKm / (111 * cos);
 
-  // Vecinos: bounding box + agregación por municipio (índice municipio_id)
   const vecinos = (await db.all(sql`
     SELECT * FROM (
       SELECT
@@ -265,7 +299,6 @@ export async function getMunicipiosCercanos(
 
   if (vecinos.length === 0) return [];
 
-  // Slugs de los vecinos (1 query para todos)
   const ids = vecinos.map((v) => v.id);
   const slugRows = (await db.all(sql`
     SELECT m.id, c.nombre AS ccaa_nombre, p.nombre AS provincia_nombre
@@ -302,7 +335,7 @@ export async function getMunicipiosCercanos(
     .filter((m): m is MunicipioCercano => m !== null);
 }
 
-// ─── Histórico agregado de un ámbito ───────────────────────────────────────
+// ─── Histórico agregado de un ámbito (desde tablas hist_*) ────────────────
 
 export interface PuntoHistorico {
   fecha: string;
@@ -318,49 +351,136 @@ export interface ResumenHistoricoAmbito {
   precioMax: number | null;
   observaciones: number;
   primeraFecha: string | null;
+  /** true si la serie es de agregados mensuales (puntos con menor resolución) */
+  mensual?: boolean;
 }
 
 /**
- * Serie agregada (media diaria del ámbito) del producto indicado.
- * `dias` limita el periodo (30/90/180/365/730).
- * Acotada por (producto_id, rango de fechas) → índice.
+ * Serie histórica agregada del producto en un ámbito.
+ *
+ * NUEVA IMPLEMENTACIÓN: lee tablas precalculadas (hist_geo_dia /
+ * hist_*_mes), NO escanea precios en tiempo real. Coste: filas de la
+ * serie (~30-90 puntos), independientemente del tamaño de la BD.
  */
 export async function getHistoricoAmbito(
   productoId: number,
   dias: number,
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {}
 ): Promise<ResumenHistoricoAmbito | null> {
-  const desde = new Date(Date.now() - dias * 86400000).toISOString().slice(0, 10);
-  const hoy = new Date().toISOString().slice(0, 10);
+  return cacheada(
+    async () => {
+      const hoy = new Date().toISOString().slice(0, 10);
+      const desde = new Date(Date.now() - dias * 86400000)
+        .toISOString()
+        .slice(0, 10);
 
-  const filtroAmbito = ambito.municipioId
-    ? sql`AND e.municipio_id = ${ambito.municipioId}`
-    : ambito.provinciaId
-      ? sql`AND e.provincia_id = ${ambito.provinciaId}`
-      : ambito.ccaaId
-        ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
-        : sql``;
+      // ── Serie diaria (hist_geo_dia) para ventanas ≤ 95 días ──
+      if (dias <= 95) {
+        const { ambitoTipo, geoId } = resolverAmbito(ambito);
+        const serie = (await db.all(sql`
+          SELECT fecha, precio_medio AS precio, n_estaciones AS n
+          FROM hist_geo_dia
+          WHERE ambito = ${ambitoTipo}
+            AND geo_id = ${geoId}
+            AND producto_id = ${productoId}
+            AND fecha >= ${desde}
+            AND fecha <= ${hoy}
+          ORDER BY fecha ASC
+        `)) as unknown as Array<{ fecha: string; precio: number; n: number }>;
 
-  const serie = (await db.all(sql`
-    SELECT pr.fecha_observacion AS fecha,
-           ROUND(AVG(pr.precio), 4) AS precio
-    FROM precios pr
-    JOIN estaciones e ON e.id = pr.estacion_id
-    WHERE pr.producto_id = ${productoId}
-      AND pr.precio IS NOT NULL
-      AND pr.fecha_observacion >= ${desde}
-      AND pr.fecha_observacion <= ${hoy}
-      ${filtroAmbito}
-    GROUP BY pr.fecha_observacion
-    ORDER BY pr.fecha_observacion ASC
-  `)) as unknown as Array<{ fecha: string; precio: number }>;
+        if (serie.length === 0) return null;
+        return resumenDesdeSerie(
+          serie.map((s) => ({ fecha: s.fecha, precio: s.precio })),
+          dias
+        );
+      }
 
-  if (serie.length === 0) return null;
+      // ── Serie mensual (hist_*_mes) para ventanas largas ──
+      const mesDesde = desde.slice(0, 7);
+      let serie: Array<{ mes: string; precio: number }>;
+      if (ambito.municipioId) {
+        serie = (await db.all(sql`
+          SELECT mes, precio_medio AS precio FROM hist_mun_mes
+          WHERE municipio_id = ${ambito.municipioId}
+            AND producto_id = ${productoId}
+            AND mes >= ${mesDesde}
+          ORDER BY mes ASC
+        `)) as unknown as Array<{ mes: string; precio: number }>;
+      } else if (ambito.provinciaId) {
+        serie = (await db.all(sql`
+          SELECT mes, precio_medio AS precio FROM hist_prov_mes
+          WHERE provincia_id = ${ambito.provinciaId}
+            AND producto_id = ${productoId}
+            AND mes >= ${mesDesde}
+          ORDER BY mes ASC
+        `)) as unknown as Array<{ mes: string; precio: number }>;
+      } else if (ambito.ccaaId) {
+        serie = (await db.all(sql`
+          SELECT mes, precio_medio AS precio FROM hist_ccaa_mes
+          WHERE ccaa_id = ${ambito.ccaaId}
+            AND producto_id = ${productoId}
+            AND mes >= ${mesDesde}
+          ORDER BY mes ASC
+        `)) as unknown as Array<{ mes: string; precio: number }>;
+      } else {
+        // Nacional largo: la serie diaria permanente da mejor resolución
+        const serieDia = (await db.all(sql`
+          SELECT fecha, precio_medio AS precio FROM hist_nac_dia
+          WHERE producto_id = ${productoId}
+            AND fecha >= ${desde}
+            AND fecha <= ${hoy}
+          ORDER BY fecha ASC
+        `)) as unknown as Array<{ fecha: string; precio: number }>;
+        if (serieDia.length > 0) {
+          return resumenDesdeSerie(
+            serieDia.map((s) => ({ fecha: s.fecha, precio: s.precio })),
+            dias
+          );
+        }
+        serie = (await db.all(sql`
+          SELECT mes, AVG(precio_medio) AS precio FROM (
+            SELECT mes, precio_medio FROM hist_prov_mes
+            WHERE producto_id = ${productoId} AND mes >= ${mesDesde}
+          )
+          GROUP BY mes ORDER BY mes ASC
+        `)) as unknown as Array<{ mes: string; precio: number }>;
+      }
 
+      if (serie.length === 0) return null;
+      const resumen = resumenDesdeSerie(
+        serie.map((s) => ({ fecha: `${s.mes}-15`, precio: s.precio })),
+        dias
+      );
+      return { ...resumen, mensual: true };
+    },
+    [
+      "hist-ambito",
+      String(productoId),
+      String(dias),
+      ambito.municipioId ?? ambito.provinciaId ?? ambito.ccaaId ?? "es",
+    ],
+    REVALIDATE_HISTORICO
+  );
+}
+
+function resolverAmbito(ambito: {
+  ccaaId?: string;
+  provinciaId?: string;
+  municipioId?: string;
+}): { ambitoTipo: string; geoId: string } {
+  if (ambito.municipioId) return { ambitoTipo: "mun", geoId: ambito.municipioId };
+  if (ambito.provinciaId) return { ambitoTipo: "prov", geoId: ambito.provinciaId };
+  if (ambito.ccaaId) return { ambitoTipo: "ccaa", geoId: ambito.ccaaId };
+  return { ambitoTipo: "nac", geoId: "ES" };
+}
+
+function resumenDesdeSerie(
+  serie: Array<{ fecha: string; precio: number }>,
+  dias: number
+): ResumenHistoricoAmbito {
   const precios = serie.map((s) => s.precio);
   const actual = precios[precios.length - 1];
 
-  // Precio de hace ~30 días: observación más cercana a hace 30 días
   const objetivo = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
   let precioHace30: number | null = null;
   let mejorDif = Number.POSITIVE_INFINITY;

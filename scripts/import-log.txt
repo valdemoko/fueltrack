@@ -1,0 +1,26 @@
+[05:52:02] Fase 1: creando esquema en Turso...
+[05:52:36] Tablas creadas.
+[05:52:36] Fase 2: geografía y estaciones...
+file:///C:/Users/migue/Documents/Google%20Adsense/combustible-malaga/node_modules/@libsql/client/lib-esm/hrana.js:310
+        return new LibsqlError(e.message, code, undefined, undefined, e);
+               ^
+
+LibsqlError: BLOCKED: Operation was blocked: SQL read operations are forbidden (reads are blocked, do you need to upgrade your plan?)
+    at mapHranaError (file:///C:/Users/migue/Documents/Google%20Adsense/combustible-malaga/node_modules/@libsql/client/lib-esm/hrana.js:310:16)
+    at file:///C:/Users/migue/Documents/Google%20Adsense/combustible-malaga/node_modules/@libsql/client/lib-esm/http.js:127:23
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async insertarFilas (file:///C:/Users/migue/Documents/Google%20Adsense/combustible-malaga/scripts/importar-turso.mjs:161:5)
+    at async file:///C:/Users/migue/Documents/Google%20Adsense/combustible-malaga/scripts/importar-turso.mjs:186:9 {
+  code: 'BLOCKED',
+  extendedCode: undefined,
+  rawCode: undefined,
+  [cause]: [ResponseError: Operation was blocked: SQL read operations are forbidden (reads are blocked, do you need to upgrade your plan?)] {
+    code: 'BLOCKED',
+    proto: {
+      message: 'Operation was blocked: SQL read operations are forbidden (reads are blocked, do you need to upgrade your plan?)',
+      code: 'BLOCKED'
+    }
+  }
+}
+
+Node.js v24.14.1

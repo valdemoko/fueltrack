@@ -56,6 +56,29 @@ const PROGRESO_CADA = 50; // logs
 const local = new Database(LOCAL_DB, { readonly: true });
 const turso = createClient({ url: TURSO_URL, authToken: TURSO_TOKEN });
 
+/** Ejecuta una sentencia con reintentos ante timeouts/errores transitorios de red. */
+async function ejecutarConReintentos(stmt, maxIntentos = 6) {
+  for (let intento = 1; intento <= maxIntentos; intento++) {
+    try {
+      return await turso.execute(stmt);
+    } catch (err) {
+      const code = err?.code ?? err?.cause?.code ?? "";
+      const recuperable =
+        code.includes("TIMEOUT") ||
+        code.includes("TIMEDOUT") ||
+        code.includes("ECONNRESET") ||
+        code.includes("ECONNREFUSED") ||
+        code.includes("ETIMEDOUT") ||
+        code.includes("SOCKET") ||
+        /timeout|network|socket|502|503|504/i.test(String(err?.message ?? ""));
+      if (!recuperable || intento === maxIntentos) throw err;
+      const espera = Math.min(60_000, 2_000 * 2 ** (intento - 1)); // 2s,4s,8s,16s,32s (máx 60s)
+      console.log(`[${now()}]   ⚠ reintento ${intento}/${maxIntentos} tras error (${code || err?.message}) — espero ${espera / 1000}s`);
+      await new Promise((r) => setTimeout(r, espera));
+    }
+  }
+}
+
 // FK off durante la importación (la ingesta local también corría con FK off;
 // hay estaciones huérfanas de municipio). Se reintegra la integridad después.
 await turso.execute("PRAGMA foreign_keys = OFF");
@@ -261,16 +284,17 @@ while (true) {
   const filas = selectLote.all(ultimaRowid, LOTE * 15); // 30.000 filas por lectura local
   if (filas.length === 0) break;
 
-  // Enviar en sub-lotes de LOTE para no exceder límites del batch de Turso
-  for (let i = 0; i < filas.length; i += LOTE) {
-    const sub = filas.slice(i, i + LOTE);
-    await turso.batch(
-      sub.map((f) => ({
-        sql: "INSERT OR IGNORE INTO precios (estacion_id, producto_id, fecha_observacion, precio) VALUES (?,?,?,?)",
-        args: [f.estacion_id, f.producto_id, f.fecha_observacion, f.precio],
-      })),
-      "write"
-    );
+  // Multi-row VALUES: 500 filas por statement → 500x menos statements.
+  // Un batch con ~30 statements de 500 filas = 15.000 filas por HTTP round-trip.
+  const FILAS_POR_STMT = 500;
+  for (let i = 0; i < filas.length; i += FILAS_POR_STMT) {
+    const sub = filas.slice(i, i + FILAS_POR_STMT);
+    const placeholders = sub.map(() => "(?,?,?,?)").join(",");
+    const args = sub.flatMap((f) => [f.estacion_id, f.producto_id, f.fecha_observacion, f.precio]);
+    await ejecutarConReintentos({
+      sql: `INSERT OR IGNORE INTO precios (estacion_id, producto_id, fecha_observacion, precio) VALUES ${placeholders}`,
+      args,
+    });
   }
 
   ultimaRowid = filas[filas.length - 1].rid;
