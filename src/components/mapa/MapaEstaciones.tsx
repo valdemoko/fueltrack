@@ -64,24 +64,36 @@ interface MapaData {
 }
 
 // ─── Componente para ajustar vista ────────────────────────────────────────
+/**
+ * Centra el mapa en las estaciones filtradas. CLAVE: solo ajusta la vista
+ * UNA VEZ por filtro (clave). Si se llamara en cada render/cambio de datos,
+ * fitBounds dispararía `moveend` → recarga de datos → nuevos datos →
+ * fitBounds… un bucle infinito de peticiones que deja el mapa cargando
+ * para siempre.
+ */
 function AjustarVista({
   estaciones,
   activo,
+  clave,
 }: {
   estaciones: EstacionMapa[];
   activo: boolean;
+  clave: string;
 }) {
   const map = useMap();
+  const ultimaClaveRef = useRef("");
 
   useEffect(() => {
     if (!activo || estaciones.length === 0) return;
+    if (ultimaClaveRef.current === clave) return; // ya ajustado para este filtro
+    ultimaClaveRef.current = clave;
 
     // Si hay filtro de municipio, centrar en las estaciones filtradas
     const bounds = L.latLngBounds(
       estaciones.map((e) => [e.latitud, e.longitud] as [number, number])
     );
     map.fitBounds(bounds, { padding: [60, 60], maxZoom: 14 });
-  }, [estaciones, map, activo]);
+  }, [estaciones, map, activo, clave]);
 
   return null;
 }
@@ -115,9 +127,32 @@ export function MapaEstaciones() {
     municipio: municipioIdParam ?? "",
     municipioId: municipioIdParam ?? undefined,
   });
+  /** Ref al filtro actual: permite a handleViewport consultarlo sin
+   *  recrear el callback (y sin re-suscribir eventos) en cada render. */
+  const filtroRef = useRef(filtro);
+  filtroRef.current = filtro;
+  /** AbortController de la petición en curso: al cambiar filtros/viewport,
+   *  la respuesta antigua se descarta en vez de machacar el estado. */
+  const abortRef = useRef<AbortController | null>(null);
+
+  /** Recarga por movimiento del mapa SOLO en modo viewport (sin filtro de
+   *  municipio: con filtro los datos no dependen del viewport y recargar
+   *  sería otro camino hacia el bucle infinito). */
+  const handleViewport = useCallback(() => {
+    const f = filtroRef.current;
+    if (!f.municipioId && !f.municipio) {
+      setViewportVersion((v) => v + 1);
+    }
+  }, []);
 
   // Fetch de datos del mapa
   const cargarDatos = useCallback(async () => {
+    // Cancelar la petición anterior si sigue en vuelo (evita respuestas
+    // obsoletas pisando a las nuevas y estados de carga eternos)
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setCargando(true);
     setError(null);
 
@@ -147,15 +182,20 @@ export function MapaEstaciones() {
         params.set("limite", "2000");
       }
 
-      const res = await fetch(`/api/mapa?${params.toString()}`);
+      const res = await fetch(`/api/mapa?${params.toString()}`, {
+        signal: controller.signal,
+      });
       if (!res.ok) throw new Error("Error al cargar datos");
 
       const json = await res.json();
+      if (controller.signal.aborted) return;
       setData(json);
     } catch (err) {
+      // Aborto esperado (nueva petición o desmontaje): no es un error real
+      if (controller.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Error desconocido");
     } finally {
-      setCargando(false);
+      if (!controller.signal.aborted) setCargando(false);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- viewportVersion fuerza la recarga al mover el mapa
   }, [filtro, viewportVersion]);
@@ -163,6 +203,11 @@ export function MapaEstaciones() {
   useEffect(() => {
     void cargarDatos();
   }, [cargarDatos]);
+
+  // Al desmontar: cancelar cualquier petición en vuelo
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   // Rango de precios para colores
   const rangoPrecios = useMemo(() => {
@@ -227,12 +272,13 @@ export function MapaEstaciones() {
             onMapa={(m) => {
               mapRef.current = m;
             }}
-            onViewport={() => setViewportVersion((v) => v + 1)}
+            onViewport={handleViewport}
           />
-          {/* Ajustar vista solo cuando hay filtro de municipio */}
+          {/* Ajustar vista solo cuando hay filtro de municipio (una vez por filtro) */}
           <AjustarVista
             estaciones={data?.estaciones ?? []}
             activo={!!(filtro.municipioId || filtro.municipio)}
+            clave={filtro.municipioId ?? filtro.municipio ?? ""}
           />
 
           {/* Capa de teselas - OpenStreetMap */}

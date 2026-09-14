@@ -1,0 +1,16 @@
+{
+  "ccaa": 19,
+  "provincias": 52,
+  "municipios": 3539,
+  "productos": 30,
+  "estaciones": 13129,
+  "precios": 46630,
+  "precios_historico": 1106682,
+  "hist_geo_dia": 1113410,
+  "hist_nac_dia": 13172,
+  "hist_mun_mes": 385059,
+  "hist_prov_mes": 14216,
+  "hist_ccaa_mes": 5539,
+  "hist_estacion_mes": 856437,
+  "hist_meses_procesados": 0
+}
