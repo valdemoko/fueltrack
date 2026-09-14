@@ -97,7 +97,7 @@ export default async function EstacionPage({ params }: Props) {
   // ─── Control de datos obsoletos ──────────────────────────────────────
   // ¿Tiene esta estación precios en la última observación del producto?
   const fechasReferencia = await getUltimasFechasProductos();
-  const fechaG95 = fechasReferencia.get(PRODUCTOS_CLAVE.GASOLINA_95_E5);
+  const fechaG95 = fechasReferencia[PRODUCTOS_CLAVE.GASOLINA_95_E5];
   const ultimoPrecioG95 = precios.find(
     (p) => p.productoId === PRODUCTOS_CLAVE.GASOLINA_95_E5
   );

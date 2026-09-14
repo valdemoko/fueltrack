@@ -1,0 +1,73 @@
+Fecha de referencia: 2026-09-13
+
+=== DATASET A SUBIR ===
+  ccaa                           19
+  provincias                     52
+  municipios                     3539
+  productos                      30
+  estaciones                     13.129
+  precios (actuales)             46.630
+  precios_historico (32d)        1.106.682
+  hist_geo_dia (95d)             1.025.651
+  hist_nac_dia                   13.172
+  hist_mun_mes                   385.059
+  hist_prov_mes                  14.216
+  hist_ccaa_mes                  5539
+  hist_estacion_mes (4 prod)     856.437
+  TOTAL                          3.470.155
+
+=== CUOTA ===
+  Escrituras estimadas:   3.817.171
+  Lecturas estimadas:     9.369.419
+  Disponible declarado:   7.000.000
+  Presupuesto máx (60%): 4.200.000
+
+✅ PLAN OK: la migración cabe en el presupuesto seguro.
+   Para ejecutar: node scripts/migrar-turso-v2.mjs --ejecutar
+[10:09:17] Fase 1: esquema (solo tablas + PK, sin índices extra)
+[10:09:18] Fase 2: geografía y estaciones
+  [10:09:18]   reanudando ccaa desde fila 19
+  [10:09:18]   reanudando provincias desde fila 52
+  [10:09:18]   reanudando municipios desde fila 3539
+  [10:09:18]   reanudando productos desde fila 30
+  [10:09:18]   reanudando estaciones desde fila 8800
+[10:09:20] Fase 3: precios actuales (1 fila est×prod)
+[10:10:39] Fase 4: precios_historico (ventana 32d)
+  [10:11:20]   precios_historico: 100.000/1.106.682
+  [10:13:07]   precios_historico: 200.000/1.106.682
+  [10:15:10]   precios_historico: 300.000/1.106.682
+  [10:18:05]   precios_historico: 400.000/1.106.682
+  [10:20:06]   precios_historico: 500.000/1.106.682
+  [10:22:29]   precios_historico: 600.000/1.106.682
+  [10:25:29]   precios_historico: 700.000/1.106.682
+  [10:28:40]   precios_historico: 800.000/1.106.682
+  [10:32:47]   precios_historico: 900.000/1.106.682
+  [10:37:52]   precios_historico: 1.000.000/1.106.682
+  [10:41:29]   precios_historico: 1.100.000/1.106.682
+[10:41:44] Fase 5: agregados (geo_dia, nac_dia, mensuales)
+  [10:42:27]   hist_geo_dia: 100.000/1.113.410
+  [10:42:44]   hist_geo_dia: 200.000/1.113.410
+  [10:43:01]   hist_geo_dia: 300.000/1.113.410
+  [10:43:17]   hist_geo_dia: 400.000/1.113.410
+  [10:43:31]   hist_geo_dia: 500.000/1.113.410
+  [10:43:46]   hist_geo_dia: 600.000/1.113.410
+  [10:44:00]   hist_geo_dia: 700.000/1.113.410
+  [10:44:16]   hist_geo_dia: 800.000/1.113.410
+  [10:44:31]   hist_geo_dia: 900.000/1.113.410
+  [10:44:46]   hist_geo_dia: 1.000.000/1.113.410
+  [10:45:01]   hist_geo_dia: 1.100.000/1.113.410
+  [10:46:20]   hist_mun_mes: 100.000/385.059
+  [10:46:35]   hist_mun_mes: 200.000/385.059
+  [10:46:49]   hist_mun_mes: 300.000/385.059
+  [10:49:19]   hist_estacion_mes: 100.000/856.437
+  [10:49:36]   hist_estacion_mes: 200.000/856.437
+  [10:49:52]   hist_estacion_mes: 300.000/856.437
+  [10:50:09]   hist_estacion_mes: 400.000/856.437
+  [10:50:30]   hist_estacion_mes: 500.000/856.437
+  [10:50:57]   hist_estacion_mes: 600.000/856.437
+  [10:51:17]   hist_estacion_mes: 700.000/856.437
+  [10:51:32]   hist_estacion_mes: 800.000/856.437
+[10:51:42] ✅ Migración v2 completada.
+   NOTA: los meses anteriores al mes pasado NO se marcan en
+   hist_meses_procesados — el cron los considerará cerrados porque sus
+   datos ya existen (ON CONFLICT DO UPDATE es idempotente).

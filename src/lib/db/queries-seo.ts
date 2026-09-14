@@ -25,7 +25,12 @@ import { slugify } from "@/lib/geografia";
 // ─── Fechas de referencia por producto ─────────────────────────────────────
 
 /** Mapa productoId → última fecha de observación (1 seek por producto). */
-export async function getUltimasFechasProductos(): Promise<Map<number, string>> {
+/**
+ * Última fecha de observación por producto (mapa productoId -> fecha).
+ * Devuelve un objeto plano (NO un Map): unstable_cache serializa a JSON y
+ * un Map perdería sus métodos al leer de caché (crash `.get is not a function`).
+ */
+export async function getUltimasFechasProductos(): Promise<Record<number, string>> {
   return cacheada(
     async () => {
       const productos = (await db.all(
@@ -34,12 +39,12 @@ export async function getUltimasFechasProductos(): Promise<Map<number, string>> 
         )`
       )) as unknown as Array<{ id: number }>;
 
-      const mapa = new Map<number, string>();
+      const mapa: Record<number, string> = {};
       for (const p of productos) {
-        const row = (await db.get(
+        const rows = (await db.all(
           sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
-        )) as unknown as { fecha: string } | undefined;
-        if (row?.fecha) mapa.set(p.id, row.fecha);
+        )) as unknown as Array<{ fecha: string }>;
+        if (rows[0]?.fecha) mapa[p.id] = rows[0].fecha;
       }
       return mapa;
     },

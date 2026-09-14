@@ -70,6 +70,7 @@ export async function mantenimientoDiario(
            ROUND(AVG(p.precio), 4), COUNT(*)
     FROM precios p JOIN estaciones e ON e.id = p.estacion_id
     WHERE p.precio IS NOT NULL
+      AND p.producto_id IN (1, 3, 4, 5)
     GROUP BY e.municipio_id, p.producto_id
     ON CONFLICT (ambito, geo_id, producto_id, fecha) DO UPDATE SET
       precio_medio = excluded.precio_medio,

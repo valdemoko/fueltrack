@@ -28,9 +28,27 @@ export async function GET(request: Request) {
   const provinciaId = searchParams.get("provinciaId");
   const ccaaId = searchParams.get("ccaaId");
   const limite = Math.min(
-    parseInt(searchParams.get("limite") || "15000", 10),
-    15000
+    parseInt(searchParams.get("limite") || "500", 10),
+    3000,
   );
+  // Viewport del mapa (bounding box): el cliente pide solo lo que ve
+  const bbox = searchParams.get("bbox");
+  let bboxConds: SQL[] = [];
+  if (bbox) {
+    const partes = bbox.split(",").map(Number);
+    if (
+      partes.length === 4 &&
+      partes.every((n) => Number.isFinite(n)) &&
+      partes[2] > partes[0] &&
+      partes[3] > partes[1]
+    ) {
+      const [latS, lonO, latN, lonE] = partes;
+      bboxConds = [
+        sql`e.latitud BETWEEN ${latS} AND ${latN}`,
+        sql`e.longitud BETWEEN ${lonO} AND ${lonE}`,
+      ];
+    }
+  }
 
   try {
     // Fecha del último precio registrado para el producto (cabecera del mapa)
@@ -53,6 +71,7 @@ export async function GET(request: Request) {
     if (municipio) {
       condiciones.push(sql`e.localidad LIKE ${`%${municipio}%`}`);
     }
+    condiciones.push(...bboxConds);
     if (provinciaId) {
       condiciones.push(sql`e.provincia_id = ${provinciaId}`);
     } else if (ccaaId) {
@@ -65,8 +84,7 @@ export async function GET(request: Request) {
     // por rango de índice → seek directo al último precio.
     // Payload mínimo: solo los campos que el pin/popup necesitan.
     // (direccion y horario se consultan en la página de la estación)
-    const filas = (await db
-      .all(sql`
+    const filas = (await db.all(sql`
         SELECT
           e.id,
           e.rotulo,
@@ -84,45 +102,57 @@ export async function GET(request: Request) {
         ${where}
         ORDER BY e.localidad ASC, e.id ASC
         LIMIT ${limite}
-      `) as Array<{
+      `)) as Array<{
       id: string;
       rotulo: string | null;
       localidad: string;
       latitud: number;
       longitud: number;
       precio: number | null;
-    }>);
+    }>;
 
     // Estadísticas para colores
     const preciosValidos = filas
       .map((e) => e.precio)
       .filter((p): p is number => p !== null);
 
-    const minPrecio = preciosValidos.length > 0 ? Math.min(...preciosValidos) : 0;
-    const maxPrecio = preciosValidos.length > 0 ? Math.max(...preciosValidos) : 0;
+    const minPrecio =
+      preciosValidos.length > 0 ? Math.min(...preciosValidos) : 0;
+    const maxPrecio =
+      preciosValidos.length > 0 ? Math.max(...preciosValidos) : 0;
     const avgPrecio =
       preciosValidos.length > 0
         ? preciosValidos.reduce((a, b) => a + b, 0) / preciosValidos.length
         : 0;
 
-    return NextResponse.json({
-      fecha: fechaPrecios,
-      producto,
-      total: filas.length,
-      estadisticas: {
-        min: minPrecio,
-        max: maxPrecio,
-        promedio: Math.round(avgPrecio * 1000) / 1000,
-        conPrecio: preciosValidos.length,
-        sinPrecio: filas.length - preciosValidos.length,
+    return NextResponse.json(
+      {
+        fecha: fechaPrecios,
+        producto,
+        total: filas.length,
+
+        estadisticas: {
+          min: minPrecio,
+          max: maxPrecio,
+          promedio: Math.round(avgPrecio * 1000) / 1000,
+          conPrecio: preciosValidos.length,
+          sinPrecio: filas.length - preciosValidos.length,
+        },
+        estaciones: filas,
       },
-      estaciones: filas,
-    });
+      {
+        // Cache en el borde de Vercel: N usuarios del mismo viewport →
+        // 1 consulta a Turso. s-max en el CDN + stale-while-revalidate.
+        headers: {
+          "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600",
+        },
+      },
+    );
   } catch (error) {
     console.error("Error al obtener datos del mapa:", error);
     return NextResponse.json(
       { error: "Error al obtener datos del mapa" },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

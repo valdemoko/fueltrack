@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback } from "react";
+import { useEffect, useState, useMemo, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   MapContainer,
@@ -25,6 +25,28 @@ const LIMITES_ESPANA: L.LatLngBoundsExpression = [
   [27.5, -18.5], // suroeste (Canarias)
   [44.5, 4.5], // noreste
 ];
+
+/**
+ * Registra la instancia del mapa en el padre y recarga los datos cuando
+ * el usuario termina de mover/zoom (para pedir solo el viewport visible).
+ */
+function ViewportBridge({
+  onMapa,
+  onViewport,
+}: {
+  onMapa: (map: L.Map) => void;
+  onViewport: () => void;
+}) {
+  const map = useMap();
+  useEffect(() => {
+    onMapa(map);
+    map.on("moveend", onViewport);
+    return () => {
+      map.off("moveend", onViewport);
+    };
+  }, [map, onMapa, onViewport]);
+  return null;
+}
 
 // ─── Tipos ─────────────────────────────────────────────────────────────────
 interface MapaData {
@@ -82,6 +104,8 @@ export function MapaEstaciones() {
   const productoParam = Number(searchParams.get("producto"));
 
   const [data, setData] = useState<MapaData | null>(null);
+  const mapRef = useRef<L.Map | null>(null);
+  const [viewportVersion, setViewportVersion] = useState(0);
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filtro, setFiltro] = useState<FiltroState>({
@@ -105,6 +129,22 @@ export function MapaEstaciones() {
         params.set("municipioId", filtro.municipioId);
       } else if (filtro.municipio) {
         params.set("municipio", filtro.municipio);
+      } else if (mapRef.current) {
+        // Sin filtro: pedir solo el viewport visible (bounding box) para no
+        // descargar las ~13k estaciones de España de una vez.
+        const b = mapRef.current.getBounds();
+        if (b) {
+          params.set(
+            "bbox",
+            [
+              b.getSouth().toFixed(4),
+              b.getWest().toFixed(4),
+              b.getNorth().toFixed(4),
+              b.getEast().toFixed(4),
+            ].join(",")
+          );
+        }
+        params.set("limite", "2000");
       }
 
       const res = await fetch(`/api/mapa?${params.toString()}`);
@@ -117,7 +157,8 @@ export function MapaEstaciones() {
     } finally {
       setCargando(false);
     }
-  }, [filtro]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- viewportVersion fuerza la recarga al mover el mapa
+  }, [filtro, viewportVersion]);
 
   useEffect(() => {
     void cargarDatos();
@@ -182,6 +223,12 @@ export function MapaEstaciones() {
           zoomControl={false}
         >
           <ZoomControl position="topright" />
+          <ViewportBridge
+            onMapa={(m) => {
+              mapRef.current = m;
+            }}
+            onViewport={() => setViewportVersion((v) => v + 1)}
+          />
           {/* Ajustar vista solo cuando hay filtro de municipio */}
           <AjustarVista
             estaciones={data?.estaciones ?? []}

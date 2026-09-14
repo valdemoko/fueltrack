@@ -15,6 +15,7 @@
  *   - limite: máx observaciones (default: 730)
  */
 import { NextResponse } from "next/server";
+import { getHistoricoAmbito } from "@/lib/db/queries-seo";
 import { eq, and, gte, lte, desc, sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
@@ -74,23 +75,46 @@ export async function GET(request: Request) {
         .where(eq(schema.productos.id, productoIdNum))
         .get();
 
-      const historico = await db
-        .select({
-          fecha: schema.precios.fechaObservacion,
-          precio: schema.precios.precio,
-        })
-        .from(schema.precios)
-        .where(
-          and(
-            eq(schema.precios.estacionId, estacionId),
-            eq(schema.precios.productoId, productoIdNum),
-            gte(schema.precios.fechaObservacion, fechaDesde),
-            lte(schema.precios.fechaObservacion, fechaHasta)
-          )
-        )
-        .orderBy(desc(schema.precios.fechaObservacion))
-        .limit(limite)
-        .all();
+      // Arquitectura de cuotas: el detalle diario vive en precios_historico
+      // (ventana ~32 días). Ventanas largas → serie mensual permanente.
+      const diasPedidos = Math.round(
+        (new Date(fechaHasta).getTime() - new Date(fechaDesde).getTime()) / 86400000
+      );
+      const historico = diasPedidos <= 31
+        ? await db
+            .select({
+              fecha: schema.preciosHistorico.fecha,
+              precio: schema.preciosHistorico.precio,
+            })
+            .from(schema.preciosHistorico)
+            .where(
+              and(
+                eq(schema.preciosHistorico.estacionId, estacionId),
+                eq(schema.preciosHistorico.productoId, productoIdNum),
+                gte(schema.preciosHistorico.fecha, fechaDesde),
+                lte(schema.preciosHistorico.fecha, fechaHasta)
+              )
+            )
+            .orderBy(desc(schema.preciosHistorico.fecha))
+            .limit(limite)
+            .all()
+        : await db
+            .select({
+              fecha: schema.histEstacionMes.mes,
+              precio: schema.histEstacionMes.precioMedio,
+            })
+            .from(schema.histEstacionMes)
+            .where(
+              and(
+                eq(schema.histEstacionMes.estacionId, estacionId),
+                eq(schema.histEstacionMes.productoId, productoIdNum),
+                gte(schema.histEstacionMes.mes, fechaDesde.slice(0, 7)),
+                lte(schema.histEstacionMes.mes, fechaHasta.slice(0, 7))
+              )
+            )
+            .orderBy(desc(schema.histEstacionMes.mes))
+            .limit(limite)
+            .all();
 
       return NextResponse.json({
         estacion: {
@@ -109,33 +133,22 @@ export async function GET(request: Request) {
     }
 
     // ── Modo 2: por área geográfica (agregado) ──
-    const condicionesArea = [
-      eq(schema.precios.productoId, productoIdNum),
-      gte(schema.precios.fechaObservacion, fechaDesde),
-      lte(schema.precios.fechaObservacion, fechaHasta),
-      sql`${schema.precios.precio} IS NOT NULL`,
-    ];
-
-    if (municipioId) {
-      condicionesArea.push(eq(schema.estaciones.municipioId, municipioId));
-    } else if (provinciaId) {
-      condicionesArea.push(eq(schema.estaciones.provinciaId, provinciaId));
-    } else if (ccaaId) {
-      condicionesArea.push(eq(schema.estaciones.ccaaId, ccaaId));
-    }
-
-    const historico = await db
-      .select({
-        fecha: schema.precios.fechaObservacion,
-        precioMedio: sql<number>`ROUND(AVG(${schema.precios.precio}), 4)`,
-      })
-      .from(schema.precios)
-      .innerJoin(schema.estaciones, eq(schema.precios.estacionId, schema.estaciones.id))
-      .where(and(...condicionesArea))
-      .groupBy(schema.precios.fechaObservacion)
-      .orderBy(schema.precios.fechaObservacion)
-      .limit(limite)
-      .all();
+    // Arquitectura de cuotas: la serie sale de las tablas agregadas
+    // (hist_geo_dia / hist_*_mes), cacheada — nunca escanea `precios`.
+    const diasPedidos = Math.round(
+      (new Date(fechaHasta).getTime() - new Date(fechaDesde).getTime()) / 86400000
+    );
+    const ambito = municipioId
+      ? { municipioId }
+      : provinciaId
+        ? { provinciaId }
+        : ccaaId
+          ? { ccaaId }
+          : {};
+    const resumen = await getHistoricoAmbito(productoIdNum, Math.max(diasPedidos, 1), ambito);
+    const historico = (resumen?.serie ?? [])
+      .slice(-limite)
+      .map((p) => ({ fecha: p.fecha, precioMedio: p.precio }));
 
     const producto = await db
       .select()

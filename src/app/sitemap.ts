@@ -15,11 +15,26 @@
  */
 import type { MetadataRoute } from "next";
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, isTurso } from "@/lib/db";
+import { unstable_cache } from "next/cache";
 import { SITE_URL } from "@/lib/siteConfig";
 import { slugify } from "@/lib/geografia";
 
-export const dynamic = "force-dynamic";
+/**
+ * El sitemap se sirve de caché (24 h): Google lo pide a diario y NO debe
+ * ejecutar las consultas completas contra Turso en cada rastreo.
+ * Coste real: ~1 pasada al día (~40k lecturas acotadas).
+ */
+const sitemapCacheado = unstable_cache(
+  async (): Promise<MetadataRoute.Sitemap> => generarSitemap(),
+  ["fueltrack-sitemap"],
+  { revalidate: 86400 }
+);
+
+export default function sitemap(): Promise<MetadataRoute.Sitemap> {
+  // En local (file:) sin caché de Next; en producción (Turso) cacheado 24 h
+  return isTurso ? sitemapCacheado() : generarSitemap();
+}
 
 /** Municipio: mínimo de estaciones para incluir el municipio y sus estaciones. */
 const MIN_ESTACIONES_MUNICIPIO = 3;
@@ -38,7 +53,7 @@ const NOMBRE_PRODUCTO: Record<number, string> = {
   5: "gasoleo-premium",
 };
 
-export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
+async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
   const fechaDatos = await (async () => {
     try {
       const row = (await db
@@ -136,10 +151,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     productoURLs = [];
 
     // Fechas máximas por producto con datos (1 seek por producto)
+    // MAX(fecha) por producto = seek índice; filtra productos sin datos gratis
     const productosConDatos = (await db.all(sql`
-      SELECT id FROM productos WHERE EXISTS (
-        SELECT 1 FROM precios WHERE precios.producto_id = productos.id
-      )
+      SELECT DISTINCT producto_id AS id FROM precios
     `)) as unknown as Array<{ id: number }>;
 
     const coberturas: Array<{ productoId: number; fecha: string }> = [];
@@ -244,15 +258,13 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   // ─── Estaciones: top por municipio (staged) ─────────────────────────────
   let estaciones: MetadataRoute.Sitemap = [];
   try {
+    // Barato: sin subqueries sobre precios (la página de estación hace su
+    // propio gate 404 en middleware). Criterio: municipio indexable.
     const filas = (await db
       .all(sql`
         SELECT e.id, e.fecha_actualizacion
         FROM estaciones e
-        WHERE EXISTS (
-          SELECT 1 FROM precios pr
-          WHERE pr.estacion_id = e.id AND pr.precio IS NOT NULL
-        )
-        AND (
+        WHERE (
           SELECT COUNT(*) FROM estaciones e2
           WHERE e2.municipio_id = e.municipio_id
         ) >= ${MIN_ESTACIONES_MUNICIPIO}

@@ -20,6 +20,7 @@ import { NextResponse } from "next/server";
 import { sql } from "drizzle-orm";
 import { db, queryGet, queryRun } from "@/lib/db";
 import { ingestProductos, ingestEstaciones } from "@/lib/miteco/ingestion";
+import { mantenimientoDiario } from "@/lib/db/mantenimiento";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -108,6 +109,9 @@ export async function GET(request: Request) {
     hastaProvinciaIdx?: number;
     estaciones?: number;
     completado?: boolean;
+    agregados?: number;
+    borrados?: number;
+    mesCerrado?: string | null;
     errores: string[];
   } = {
     timestamp: new Date().toISOString(),
@@ -163,6 +167,25 @@ export async function GET(request: Request) {
     resultado.hastaProvinciaIdx = idx;
     resultado.completado = completado;
     resultado.estaciones = totalEstaciones;
+
+    // ── Mantenimiento diario (agregados + retención + cierre mensual) ──
+    // Solo cuando la ingesta del día está completa; si quedó a medias,
+    // el mantenimiento se ejecutará al terminar el día siguiente.
+    if (completado) {
+      const quedanMs = PRESUPUESTO_MS - (Date.now() - startTime);
+      if (quedanMs > 5_000) {
+        // Con tiempo: mantenimiento completo (agregados + retención + mes)
+        const mant = await mantenimientoDiario(false);
+        resultado.agregados = mant.agregados;
+        resultado.borrados = mant.borrados;
+        resultado.mesCerrado = mant.mesCerrado;
+      } else {
+        // Sin tiempo: solo agregados del día (baratos); retención mañana
+        const mant = await mantenimientoDiario(true);
+        resultado.agregados = mant.agregados;
+      }
+    }
+
     resultado.duracionMs = Date.now() - startTime;
     console.log(
       `[cron] OK: provincias ${desde}..${idx - 1}, ${totalEstaciones} estaciones en ${resultado.duracionMs}ms (completado=${completado})`

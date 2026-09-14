@@ -32,10 +32,11 @@ export function cacheada<T>(
   clave: string[],
   revalidateSegundos: number
 ): Promise<T> {
-  // En desarrollo local el dato cambia constantemente y el caché de Next
-  // puede servir valores antiguos entre reinicios: se aplica igualmente
-  // (la ventana corta lo hace inofensivo) salvo que se desactive.
   if (process.env.DB_NO_CACHE === "1") return fn();
+  // BD local (file:): las consultas son <50 ms y el dato cambia a diario;
+  // unstable_cache solo aporta en producción con Turso remoto (y en local
+  // interfiere con el driver nativo en `next start`).
+  if (!isTurso) return fn();
   const memo = unstable_cache(fn, ["fueltrack", ...clave], {
     revalidate: revalidateSegundos,
   });
