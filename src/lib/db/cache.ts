@@ -16,8 +16,10 @@
 import { unstable_cache } from "next/cache";
 import { isTurso } from "./index";
 
-/** Minutos que vive el caché de agregados "actuales" (medias, cobertura). */
-export const REVALIDATE_PRECIOS = 900; // 15 min
+/** Minutos que vive el caché de agregados "actuales" (medias, cobertura).
+ *  Los precios son una foto diaria (cron 06:00 UTC): 1 h de caché es
+ *  indistinguible para el usuario y divide ×4 las consultas de revalidación. */
+export const REVALIDATE_PRECIOS = 3600; // 1 h
 /** Minutos para series históricas/agregados mensuales (muy estables). */
 export const REVALIDATE_HISTORICO = 21600; // 6 h
 /** Minutos para listados estructurales (geo, cobertura sitemap). */

@@ -18,7 +18,8 @@ import {
 import { slugify } from "@/lib/geografia";
 import { PRODUCTOS_CLAVE } from "@/lib/types/miteco";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: "Precios de combustibles en España hoy — Medias nacionales",

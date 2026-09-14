@@ -25,7 +25,8 @@ import { CtaMapaMunicipio } from "@/components/precios/CtaMapaMunicipio";
 import { SelectorCombustible } from "@/components/precios/SelectorCombustible";
 import { PRODUCTOS_CLAVE } from "@/lib/types/miteco";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 interface Props {
   params: Promise<{ ccaa: string; provincia: string }>;

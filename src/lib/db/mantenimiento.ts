@@ -119,7 +119,15 @@ export async function mantenimientoDiario(
     return { agregados, borrados: 0, mesCerrado: null };
   }
 
-  // ── 2. Retención (DELETE acotados por índice de fecha) ────────────────
+  // ── 2. Retención (solo 1 vez por semana) ─────────────────────────────
+  // Los DELETE por fecha no pueden usar la PK (la fecha no es la columna
+  // inicial) → cada pasada escanea millones de filas (~2,2M lecturas).
+  // Ejecutándolo solo los lunes el coste baja de ~66M lecturas/mes a ~9M,
+  // sin efecto visible: la ventana se desplaza como mucho 6 días.
+  const esLunes = new Date().getUTCDay() === 1;
+  if (!esLunes) {
+    return { agregados, borrados: 0, mesCerrado: null };
+  }
   const corteHist = fechaMenosDias(RETENCION_DIAS_HISTORICO);
   const corteGeo = fechaMenosDias(RETENCION_DIAS_GEO);
 

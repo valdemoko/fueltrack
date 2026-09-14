@@ -6,7 +6,8 @@ import {
 } from "@/lib/db/queries";
 import { slugify } from "@/lib/geografia";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: "Gasolineras en España — Estaciones por comunidad autónoma",

@@ -31,9 +31,11 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
-// Renderizado dinámico: los precios son por-request (SQLite) y, además,
-// garantiza que notFound() emita un 404 HTTP real (no un 200 en streaming).
-export const dynamic = "force-dynamic";
+// ISR: la página se sirve del CDN de Vercel y se revalida cada hora en
+// segundo plano. Protege la cuota de lectura de Turso: las visitas y el
+// rastreo de Google NO ejecutan consultas salvo en la revalidación.
+// El 404 duro para IDs inexistentes lo garantiza el gate del middleware.
+export const revalidate = 3600;
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;

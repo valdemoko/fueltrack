@@ -31,7 +31,8 @@ import { BannerAd } from "@/components/ads/BannerAd";
 import { ADSENSE_SLOT_LISTADO } from "@/lib/siteConfig";
 import { PRODUCTOS_CLAVE } from "@/lib/types/miteco";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 interface Props {
   params: Promise<{

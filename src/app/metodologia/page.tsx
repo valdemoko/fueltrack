@@ -3,7 +3,8 @@ import Link from "next/link";
 import { getUltimaFechaGlobal } from "@/lib/db/queries";
 import { SITE_NAME, SITE_URL } from "@/lib/siteConfig";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 export const metadata: Metadata = {
   title: "Metodología — De dónde salen los datos y cómo se procesan",

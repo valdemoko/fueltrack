@@ -13,7 +13,8 @@ import {
   getResumenProductosPrincipales,
 } from "@/lib/db/queries";
 
-export const dynamic = "force-dynamic";
+// ISR (revalidación horaria): protege la cuota de lectura de Turso.
+export const revalidate = 3600;
 
 interface Props {
   params: Promise<{ ccaa: string }>;
