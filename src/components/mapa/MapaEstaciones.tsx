@@ -169,13 +169,18 @@ export function MapaEstaciones() {
         // descargar las ~13k estaciones de España de una vez.
         const b = mapRef.current.getBounds();
         if (b) {
+          // Cuantizar el bbox a la MISMA rejilla de 0,05° que aplica el
+          // backend: así viewports casi idénticos de distintos usuarios
+          // producen la misma URL y comparten caché CDN.
+          const q = (v: number) =>
+            String(Math.round(v / 0.05) * 0.05);
           params.set(
             "bbox",
             [
-              b.getSouth().toFixed(4),
-              b.getWest().toFixed(4),
-              b.getNorth().toFixed(4),
-              b.getEast().toFixed(4),
+              q(b.getSouth()),
+              q(b.getWest()),
+              q(b.getNorth()),
+              q(b.getEast()),
             ].join(",")
           );
         }

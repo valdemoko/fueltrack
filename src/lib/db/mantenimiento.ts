@@ -52,6 +52,23 @@ export async function mantenimientoDiario(
   // ── 1. Agregados diarios de HOY ────────────────────────────────────────
   // Lectura: solo precios de hoy (≤43k filas, índice por fecha_observacion).
 
+  // Resumen nacional precalculado (1 fila por producto, ~30 filas):
+  // protege la cuota — las páginas de estación y resúmenes nacionales
+  // leen esta tabla (≤30 filas) en vez de escanear `precios` (~46k).
+  // Coste: 1 pasada por precios/día (~46k lecturas + ~30 escrituras).
+  await db.run(sql`
+    INSERT INTO resumen_nacional (producto_id, precio_medio, precio_min, precio_max, total_estaciones, fecha)
+    SELECT producto_id, ROUND(AVG(precio), 4), MIN(precio), MAX(precio), COUNT(DISTINCT estacion_id), MAX(fecha_observacion)
+    FROM precios WHERE precio IS NOT NULL
+    GROUP BY producto_id
+    ON CONFLICT (producto_id) DO UPDATE SET
+      precio_medio = excluded.precio_medio,
+      precio_min = excluded.precio_min,
+      precio_max = excluded.precio_max,
+      total_estaciones = excluded.total_estaciones,
+      fecha = excluded.fecha
+  `);
+
   // Nacional diario + permanente (hist_nac_dia nunca se poda: ~13k filas/2a)
   await db.run(sql`
     INSERT INTO hist_nac_dia (producto_id, fecha, precio_medio, n_estaciones)

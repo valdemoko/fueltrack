@@ -31,11 +31,13 @@ interface Props {
   params: Promise<{ id: string }>;
 }
 
-// ISR: la página se sirve del CDN de Vercel y se revalida cada hora en
+// ISR: la página se sirve del CDN de Vercel y se revalida cada 6 h en
 // segundo plano. Protege la cuota de lectura de Turso: las visitas y el
 // rastreo de Google NO ejecutan consultas salvo en la revalidación.
+// 6 h en vez de 1 h: los precios cambian 1 vez al día (cron 06:00 UTC),
+// así que el usuario no percibe diferencia y las lecturas bajan ~6×.
 // El 404 duro para IDs inexistentes lo garantiza el gate del middleware.
-export const revalidate = 3600;
+export const revalidate = 21600;
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;

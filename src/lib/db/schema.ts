@@ -272,3 +272,21 @@ export const histMesesProcesados = sqliteTable("hist_meses_procesados", {
   mes: text("mes").primaryKey(),
   procesadoEn: text("procesado_en").notNull(),
 });
+
+/**
+ * Resumen nacional PRECALCULADO (1 fila por producto, ~30 filas en total).
+ *
+ * Motivo de existencia: cuota de Turso. Sin esta tabla, cada render de una
+ * ficha de estación o resumen nacional escanea toda `precios` (~46k filas)
+ * por producto. Con ella, la consulta lee 1 fila. El cron diario la
+ * refresca (1 pasada por precios/día, ~46k lecturas + ~30 escrituras).
+ */
+export const resumenNacional = sqliteTable("resumen_nacional", {
+  productoId: integer("producto_id").primaryKey(),
+  precioMedio: real("precio_medio").notNull(),
+  precioMin: real("precio_min").notNull(),
+  precioMax: real("precio_max").notNull(),
+  totalEstaciones: integer("total_estaciones").notNull(),
+  /** Fecha de la última observación del producto (yyyy-MM-dd). */
+  fecha: text("fecha").notNull(),
+});

@@ -23,9 +23,15 @@ function all<T>(q: SQL): Promise<T[]> {
 
 /**
  * Fecha de la última observación válida de un producto.
- * Con la arquitectura "precios actuales" es un seek por índice sobre ≤43k filas.
+ * Lee `resumen_nacional` (1 fila) si existe; si no, seek sobre `precios`.
  */
 export async function getUltimaFechaProducto(productoId: number): Promise<string | null> {
+  const fila = await db
+    .select({ fecha: schema.resumenNacional.fecha })
+    .from(schema.resumenNacional)
+    .where(eq(schema.resumenNacional.productoId, productoId))
+    .get();
+  if (fila?.fecha) return fila.fecha;
   const row = await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
     .from(schema.precios)
@@ -98,6 +104,42 @@ async function resumenProductoInterna(
 ): Promise<ResumenProducto | null> {
   const fecha = await getUltimaFechaProducto(productoId);
   if (!fecha) return null;
+
+  // Ámbito NACIONAL: leer la fila precalculada de `resumen_nacional` (1 fila
+  // leída) en vez de escanear `precios` (~46k filas). Si la tabla aún no
+  // existe o no tiene la fila (primer arranque), cae al cálculo clásico.
+  if (!ambito.municipioId && !ambito.provinciaId && !ambito.ccaaId) {
+    try {
+      const r = await db
+        .select({
+          productoId: schema.resumenNacional.productoId,
+          nombre: schema.productos.nombre,
+          abreviatura: schema.productos.abreviatura,
+          precioMedio: schema.resumenNacional.precioMedio,
+          precioMin: schema.resumenNacional.precioMin,
+          precioMax: schema.resumenNacional.precioMax,
+          totalEstaciones: schema.resumenNacional.totalEstaciones,
+        })
+        .from(schema.resumenNacional)
+        .innerJoin(schema.productos, eq(schema.productos.id, schema.resumenNacional.productoId))
+        .where(eq(schema.resumenNacional.productoId, productoId))
+        .get();
+      if (r && r.totalEstaciones > 0) {
+        return {
+          productoId: r.productoId,
+          nombre: r.nombre,
+          abreviatura: r.abreviatura,
+          precioMedio: r.precioMedio,
+          precioMin: r.precioMin,
+          precioMax: r.precioMax,
+          totalEstaciones: r.totalEstaciones,
+          fecha,
+        };
+      }
+    } catch {
+      // Tabla aún no creada: seguir con el cálculo clásico
+    }
+  }
 
   // `precios` = solo precios actuales: no hace falta filtrar por fecha exacta
   const row = await all<{

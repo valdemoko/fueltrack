@@ -31,8 +31,16 @@ export async function GET(request: Request) {
     parseInt(searchParams.get("limite") || "500", 10),
     3000,
   );
-  // Viewport del mapa (bounding box): el cliente pide solo lo que ve
+  // Viewport del mapa (bounding box): el cliente pide solo lo que ve.
+  // CUANTIZACIÓN: se redondea el bbox a una rejilla de 0,05° (~5 km) ANTES
+  // de usarlo. Los arrastres/zooms de distintos usuarios así comparten la
+  // misma clave de caché del CDN en vez de generar consultas únicas
+  // (cada viewport único = un escaneo a la BD). El usuario no nota nada:
+  // el margen extra del bbox redondeado está fuera de su vista.
   const bbox = searchParams.get("bbox");
+  const CUANTIZACION = 0.05;
+  const cuantizar = (v: number) =>
+    Math.round(v / CUANTIZACION) * CUANTIZACION;
   let bboxConds: SQL[] = [];
   if (bbox) {
     const partes = bbox.split(",").map(Number);
@@ -43,9 +51,13 @@ export async function GET(request: Request) {
       partes[3] > partes[1]
     ) {
       const [latS, lonO, latN, lonE] = partes;
+      const s = cuantizar(latS);
+      const o = cuantizar(lonO);
+      const n = cuantizar(latN);
+      const e = cuantizar(lonE);
       bboxConds = [
-        sql`e.latitud BETWEEN ${latS} AND ${latN}`,
-        sql`e.longitud BETWEEN ${lonO} AND ${lonE}`,
+        sql`e.latitud BETWEEN ${s} AND ${n}`,
+        sql`e.longitud BETWEEN ${o} AND ${e}`,
       ];
     }
   }
@@ -142,9 +154,11 @@ export async function GET(request: Request) {
       },
       {
         // Cache en el borde de Vercel: N usuarios del mismo viewport →
-        // 1 consulta a Turso. s-max en el CDN + stale-while-revalidate.
+        // 1 consulta a Turso. s-max 1 h (los precios cambian 1 vez al día;
+        // con bbox cuantizado, la clave de caché se comparte entre
+        // usuarios). stale-while-revalidate refresca en segundo plano.
         headers: {
-          "Cache-Control": "public, s-maxage=900, stale-while-revalidate=3600",
+          "Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
         },
       },
     );
