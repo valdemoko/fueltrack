@@ -19,8 +19,12 @@ import * as schema from "./schema";
 
 /** Días de histórico detallado por estación que se conservan. */
 export const RETENCION_DIAS_HISTORICO = 32;
-/** Días de agregados diarios geográficos que se conservan. */
-export const RETENCION_DIAS_GEO = 95;
+/**
+ * Días de agregados diarios geográficos que se conservan.
+ * Alineado con la política "30 días diarios + mensual para el pasado":
+ * las gráficas de 1 mes usan estos datos; más allá, las tablas mensuales.
+ */
+export const RETENCION_DIAS_GEO = 35;
 
 function hoyIso(): string {
   return new Date().toISOString().slice(0, 10);

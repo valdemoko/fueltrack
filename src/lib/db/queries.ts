@@ -13,7 +13,7 @@ import {
   cacheada,
   REVALIDATE_PRECIOS,
   REVALIDATE_HISTORICO,
-  REVALIDATE_ESTRUCTURA,
+  TAG_PRECIOS,
 } from "./cache";
 
 /** SELECT genérico tipado contra el driver async (equivale al antiguo db.all síncrono). */
@@ -94,7 +94,8 @@ export async function getResumenProducto(
   return cacheada(
     () => resumenProductoInterna(productoId, ambito),
     ["resumen-prod", String(productoId), claveAmbito],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -213,7 +214,8 @@ export async function getMunicipiosDeProvincia(
   return cacheada(
     () => municipiosDeProvinciaInterna(provinciaId, productoId),
     ["municipios-prov", provinciaId, String(productoId)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -278,7 +280,8 @@ export async function getEstacionesDeMunicipio(
   return cacheada(
     () => estacionesDeMunicipioInterna(municipioId, productoId, limite),
     ["est-mun", municipioId, String(productoId), String(limite)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -333,7 +336,8 @@ export async function getEstacionesDeProvincia(
   return cacheada(
     () => estacionesDeProvinciaInterna(provinciaId, productoId, limite),
     ["est-prov", provinciaId, String(productoId), String(limite)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -402,7 +406,8 @@ export async function getResumenHistoricoEstacion(
   return cacheada(
     () => resumenHistoricoEstacionInterna(estacionId, productoId, dias),
     ["hist-est", estacionId, String(productoId), String(dias)],
-    REVALIDATE_HISTORICO
+    REVALIDATE_HISTORICO,
+    [TAG_PRECIOS]
   );
 }
 
@@ -729,7 +734,8 @@ export async function getComparativaZona(
   return cacheada(
     () => comparativaZonaInterna(municipioId, productoId),
     ["comparativa", municipioId, String(productoId)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -793,7 +799,8 @@ export async function getEstacionesCercanas(
         estacionId, latitud, longitud, productoId, radioKm, limite
       ),
     ["cercanas", estacionId, String(productoId), String(radioKm)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -935,7 +942,8 @@ export async function getEstacionesBaratas(
   return cacheada(
     () => estacionesBaratasInterna(productoId, limite, ambito),
     ["baratas", String(productoId), String(limite), claveAmbito],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 

@@ -17,10 +17,12 @@
  * dejar la ingesta abierta al público.
  */
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
 import { sql } from "drizzle-orm";
 import { db, queryGet, queryRun } from "@/lib/db";
 import { ingestProductos, ingestEstaciones } from "@/lib/miteco/ingestion";
 import { mantenimientoDiario } from "@/lib/db/mantenimiento";
+import { TAG_PRECIOS } from "@/lib/db/cache";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
@@ -184,6 +186,16 @@ export async function GET(request: Request) {
         const mant = await mantenimientoDiario(true);
         resultado.agregados = mant.agregados;
       }
+    }
+
+    // ── Invalidación de caché por evento ─────────────────────────────────
+    // Las cachés de precios NO expiran por reloj (el TTL de 24 h es solo
+    // red de seguridad): el refresco normal ocurre aquí, UNA vez por ciclo
+    // de datos. La primera visita tras el cron regenera cada caché una vez;
+    // el resto del día, coste de lectura de BD = 0.
+    if (completado) {
+      revalidateTag(TAG_PRECIOS);
+      console.log(`[cron] Caché invalidada por evento: tag "${TAG_PRECIOS}"`);
     }
 
     resultado.duracionMs = Date.now() - startTime;

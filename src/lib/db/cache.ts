@@ -1,14 +1,19 @@
 /**
  * Caché de datos para proteger la cuota de lectura de Turso.
  *
- * Estrategia (compatible con Vercel Hobby):
- *  - Las páginas SSR consultan la BD en cada request → con unstable_cache
- *    el mismo dato se sirve de la caché de Next hasta que expire o se
- *    revalide. Mil visitas → 1 lectura a Turso en vez de mil.
- *  - La ventana de caché es corta (15 min por defecto): los precios
- *    siguen percibiéndose "de hoy" sin machacar la BD.
- *  - En desarrollo (sin TURSO_DATABASE_URL) unstable_cache también
- *    aplica; se limpia en cada recarga de dev.
+ * Estrategia — INVALIDACIÓN POR EVENTOS (no por reloj):
+ *  - Los precios son una foto diaria (cron 06:00 UTC): los datos de días
+ *    anteriores NUNCA cambian. Por eso las cachés NO se revalidan cada hora:
+ *    llevan un TTL largo solo como red de seguridad (si el cron fallara o no
+ *    pudiera invalidar, los datos se refrescan solos al día siguiente).
+ *  - Tras la ingesta diaria, el cron llama a `revalidateTag(TAG_PRECIOS)`:
+ *    todas las cachés de precios se regeneran EXACTAMENTE una vez por ciclo
+ *    de datos, con la primera visita posterior al cron. El resto del día,
+ *    coste de lectura = 0 pase lo que pase en la web.
+ *  - Los datos estructurales (geografía, cobertura) casi nunca cambian: TTL
+ *    semanal + tag "estructura" (solo se invalida si algún día se ingesta
+ *    el catálogo de estaciones a mano).
+ *  - En desarrollo (BD local file:) no se cachea: las consultas son <50 ms.
  *
  * Todos los wrappers son no-op seguros si React no está disponible
  * (scripts CLI fuera de request): devuelven la función tal cual.
@@ -16,23 +21,32 @@
 import { unstable_cache } from "next/cache";
 import { isTurso } from "./index";
 
-/** Minutos que vive el caché de agregados "actuales" (medias, cobertura).
- *  Los precios son una foto diaria (cron 06:00 UTC): 1 h de caché es
- *  indistinguible para el usuario y divide ×4 las consultas de revalidación. */
-export const REVALIDATE_PRECIOS = 3600; // 1 h
-/** Minutos para series históricas/agregados mensuales (muy estables). */
-export const REVALIDATE_HISTORICO = 21600; // 6 h
-/** Minutos para listados estructurales (geo, cobertura sitemap). */
-export const REVALIDATE_ESTRUCTURA = 86400; // 24 h
+/**
+ * TTL de seguridad para datos derivados de precios (resúmenes, series,
+ * comparativas…). El camino normal de refresco es el `revalidateTag` del
+ * cron; este TTL solo actúa si la invalidación no puede ejecutarse.
+ */
+export const REVALIDATE_PRECIOS = 86400; // 24 h (red de seguridad)
+/** TTL de seguridad para series históricas cerradas (todavía más estables). */
+export const REVALIDATE_HISTORICO = 86400; // 24 h (red de seguridad)
+/** TTL para listados estructurales (geografía, cobertura sitemap). */
+export const REVALIDATE_ESTRUCTURA = 604800; // 7 días
+
+/** Tag de invalidación para todo lo derivado de la tabla `precios`. */
+export const TAG_PRECIOS = "precios";
+/** Tag de invalidación para datos estructurales (geografía, catálogos). */
+export const TAG_ESTRUCTURA = "estructura";
 
 /**
  * Envuelve una función async de lectura con unstable_cache.
  * `claves` participan de la clave de caché (ids, fechas de corte...).
+ * `tags` permite al cron invalidar el grupo con revalidateTag(tag).
  */
 export function cacheada<T>(
   fn: () => Promise<T>,
   clave: string[],
-  revalidateSegundos: number
+  revalidateSegundos: number,
+  tags: string[] = []
 ): Promise<T> {
   if (process.env.DB_NO_CACHE === "1") return fn();
   // BD local (file:): las consultas son <50 ms y el dato cambia a diario;
@@ -41,6 +55,7 @@ export function cacheada<T>(
   if (!isTurso) return fn();
   const memo = unstable_cache(fn, ["fueltrack", ...clave], {
     revalidate: revalidateSegundos,
+    tags: ["fueltrack", ...tags],
   });
   return memo();
 }

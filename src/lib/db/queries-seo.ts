@@ -19,6 +19,8 @@ import {
   REVALIDATE_PRECIOS,
   REVALIDATE_HISTORICO,
   REVALIDATE_ESTRUCTURA,
+  TAG_PRECIOS,
+  TAG_ESTRUCTURA,
 } from "./cache";
 import { slugify } from "@/lib/geografia";
 
@@ -49,7 +51,8 @@ export async function getUltimasFechasProductos(): Promise<Record<number, string
       return mapa;
     },
     ["fechas-productos"],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -84,7 +87,8 @@ export async function getCoberturaProductos(
   return cacheada(
     () => coberturaProductosInterna(ambito, minEstaciones),
     ["cobertura", claveAmbito, String(minEstaciones)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -211,7 +215,8 @@ export async function getEstacionesMunicipioProducto(
       }));
     },
     ["est-mun-prod", municipioId, String(productoId)],
-    REVALIDATE_PRECIOS
+    REVALIDATE_PRECIOS,
+    [TAG_PRECIOS]
   );
 }
 
@@ -236,7 +241,8 @@ export async function getMunicipiosCercanos(
   return cacheada(
     () => municipiosCercanosInterna(municipioId, limite, radioKm),
     ["muni-cercanos", municipioId, String(limite), String(radioKm)],
-    REVALIDATE_ESTRUCTURA
+    REVALIDATE_ESTRUCTURA,
+    [TAG_ESTRUCTURA]
   );
 }
 
@@ -464,7 +470,8 @@ export async function getHistoricoAmbito(
       String(dias),
       ambito.municipioId ?? ambito.provinciaId ?? ambito.ccaaId ?? "es",
     ],
-    REVALIDATE_HISTORICO
+    REVALIDATE_HISTORICO,
+    [TAG_PRECIOS]
   );
 }
 
