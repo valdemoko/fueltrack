@@ -1,0 +1,72 @@
+{
+  "ccaa": {
+    "a_migrar": 19,
+    "total_local": 19,
+    "filtro": null
+  },
+  "provincias": {
+    "a_migrar": 52,
+    "total_local": 52,
+    "filtro": null
+  },
+  "municipios": {
+    "a_migrar": 3539,
+    "total_local": 3539,
+    "filtro": null
+  },
+  "productos": {
+    "a_migrar": 30,
+    "total_local": 30,
+    "filtro": null
+  },
+  "estaciones": {
+    "a_migrar": 13129,
+    "total_local": 13129,
+    "filtro": null
+  },
+  "precios": {
+    "a_migrar": 46630,
+    "total_local": 46630,
+    "filtro": null
+  },
+  "precios_historico": {
+    "a_migrar": 1039242,
+    "total_local": 1106682,
+    "filtro": "fecha >= '2026-08-14'"
+  },
+  "hist_geo_dia": {
+    "a_migrar": 393442,
+    "total_local": 1113410,
+    "filtro": "fecha >= '2026-08-11'"
+  },
+  "hist_nac_dia": {
+    "a_migrar": 13172,
+    "total_local": 13172,
+    "filtro": null
+  },
+  "hist_mun_mes": {
+    "a_migrar": 385059,
+    "total_local": 385059,
+    "filtro": null
+  },
+  "hist_prov_mes": {
+    "a_migrar": 14216,
+    "total_local": 14216,
+    "filtro": null
+  },
+  "hist_ccaa_mes": {
+    "a_migrar": 5539,
+    "total_local": 5539,
+    "filtro": null
+  },
+  "hist_estacion_mes": {
+    "a_migrar": 856437,
+    "total_local": 856437,
+    "filtro": null
+  },
+  "hist_meses_procesados": {
+    "a_migrar": 0,
+    "total_local": 0,
+    "filtro": null
+  }
+}
