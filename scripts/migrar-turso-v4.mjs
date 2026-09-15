@@ -182,6 +182,19 @@ CREATE TABLE IF NOT EXISTS cron_progreso (
   provincia_idx INTEGER NOT NULL DEFAULT 0,
   actualizado_en TEXT NOT NULL
 );
+-- Índices secundarios (las PK solos no cubren los filtros de la app;
+-- sin ellos cada consulta escanea tablas enteras y quema la cuota):
+CREATE INDEX IF NOT EXISTS idx_estaciones_provincia ON estaciones(provincia_id);
+CREATE INDEX IF NOT EXISTS idx_estaciones_ccaa ON estaciones(ccaa_id);
+CREATE INDEX IF NOT EXISTS idx_estaciones_municipio ON estaciones(municipio_id);
+CREATE INDEX IF NOT EXISTS idx_estaciones_lat_lon ON estaciones(latitud, longitud);
+CREATE INDEX IF NOT EXISTS idx_precios_producto ON precios(producto_id);
+CREATE INDEX IF NOT EXISTS idx_precios_fecha ON precios(fecha_observacion);
+CREATE INDEX IF NOT EXISTS idx_precios_producto_fecha ON precios(producto_id, fecha_observacion);
+CREATE INDEX IF NOT EXISTS idx_municipios_provincia ON municipios(provincia_id);
+CREATE INDEX IF NOT EXISTS idx_provincias_ccaa ON provincias(ccaa_id);
+CREATE INDEX IF NOT EXISTS idx_hist_fecha ON precios_historico(fecha);
+CREATE INDEX IF NOT EXISTS idx_hist_geo_fecha ON hist_geo_dia(fecha);
 `;
   // resumen_nacional podría ya venir en el esquema local (futuro); evitar duplicado
   const sinDuplicado = ddlLocal.includes("CREATE TABLE resumen_nacional")
