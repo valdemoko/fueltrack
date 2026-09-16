@@ -16,7 +16,6 @@ import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
 import * as schema from "@/lib/db/schema";
 import { ingestEstaciones, ingestProductos } from "@/lib/miteco/ingestion";
-import { mantenimientoDiario } from "@/lib/db/mantenimiento";
 
 // ─── Env ─────────────────────────────────────────────────────────────────────
 
@@ -113,6 +112,7 @@ async function main() {
   // 3. Mantenimiento diario: agregados del día + retención semanal +
   //    cierre mensual + refresh de resumen_nacional.
   console.log("\n→ Mantenimiento diario (agregados, retención, resumen_nacional)...");
+  const { mantenimientoDiario } = await import("@/lib/db/mantenimiento");
   const mant = await mantenimientoDiario(false);
   console.log(
     `✔ Agregados: ${mant.agregados} filas | Borrados (retención): ${mant.borrados} | Mes cerrado: ${mant.mesCerrado ?? "—"}`

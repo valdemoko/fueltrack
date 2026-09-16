@@ -52,19 +52,19 @@ export const db = drizzle(client, { schema });
 
 /** Ejecuta un SELECT y devuelve todas las filas como objetos planos. */
 export async function queryAll<T = Record<string, unknown>>(query: SQL): Promise<T[]> {
-  const result = await client.execute(query as unknown as string);
-  return result.rows as unknown as T[];
+  const rows = await db.all(query);
+  return rows as unknown as T[];
 }
 
 /** Ejecuta un SELECT y devuelve la primera fila o undefined. */
 export async function queryGet<T = Record<string, unknown>>(query: SQL): Promise<T | undefined> {
-  const rows = await queryAll<T>(query);
-  return rows[0];
+  const row = await db.get(query);
+  return row as unknown as (T | undefined);
 }
 
 /** Ejecuta un INSERT/UPDATE/DELETE. Devuelve el número de filas afectadas. */
 export async function queryRun(query: SQL): Promise<number> {
-  const result = await client.execute(query as unknown as string);
+  const result = await db.run(query);
   return result.rowsAffected;
 }
 
