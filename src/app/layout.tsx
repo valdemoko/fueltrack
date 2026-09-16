@@ -41,14 +41,6 @@ export const metadata: Metadata = {
     title: `${SITE_NAME} — Precios de carburantes en tiempo real`,
     description: SITE_DESCRIPTION,
   },
-  icons: {
-    icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
-      { url: "/favicon.ico", sizes: "any" },
-    ],
-    shortcut: "/favicon.ico",
-    apple: "/apple-icon.png",
-  },
   ...(GOOGLE_SITE_VERIFICATION
     ? { verification: { google: GOOGLE_SITE_VERIFICATION } }
     : {}),
