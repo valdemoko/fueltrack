@@ -6,9 +6,14 @@
  *   - /gasolineras (España) + CCAA + provincias + municipios con estaciones
  *   - Variantes combustible+provincia SOLO con cobertura real (>= 50 estaciones
  *     con precio del producto en la provincia)
- *   - Variantes combustible+municipio SOLO con cobertura real (>= 3 estaciones)
- *     usando la URL canónica ?producto=<id>
- *   - Estaciones con precio (tope de seguridad, escalonado)
+ *   - Estaciones (tope escalonado, se ampliará según Search Console)
+ *
+ * NO incluye variantes combustible+municipio (?producto= de municipio):
+ * son casi-duplicados de la página base del municipio y con un dominio nuevo
+ * y sin autoridad saturaban el crawl budget (Search Console: ~6.500 URLs
+ * "Descubierta: actualmente sin indexar", feb 2026). Las páginas siguen
+ * existiendo con canonical propia y enlazadas por tabs; se re-añadirán al
+ * sitemap cuando las páginas base estén indexadas.
  *
  * Excluye: parámetros de orden, filtros sin datos, páginas vacías y APIs.
  * Prioridad: calidad de contenido sobre cantidad de URLs.
@@ -35,8 +40,11 @@ const MIN_ESTACIONES_MUNICIPIO = 3;
 const MIN_COBERTURA_PRODUCTO_MUNICIPIO = 3;
 /** Combustible+provincia: mínimo de estaciones con precio del producto. */
 const MIN_COBERTURA_PRODUCTO_PROVINCIA = 50;
-/** Tope de URLs de estaciones (escalado gradual por Search Console). */
-const MAX_ESTACIONES_SITEMAP = 5000;
+/** Tope de URLs de estaciones (escalado gradual por Search Console):
+ *  dominio nuevo sin autoridad → crawl budget limitado; mejor 800 URLs
+ *  bien rastreadas que 5.000 "descubiertas sin indexar". Ampliar cuando
+ *  Search Console muestre indexación masiva de la etapa actual. */
+const MAX_ESTACIONES_SITEMAP = 800;
 
 /** Nombres amigables para las URLs de combustible. */
 const NOMBRE_PRODUCTO: Record<number, string> = {
@@ -195,62 +203,62 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
       });
     }
 
-    // Combustible + municipio (solo municipios ya indexables y con cobertura)
-    const coberturaMunicipio: Array<{ municipio_id: string; producto_id: number }> = [];
-    for (const { productoId, fecha } of coberturas) {
-      const filas = (await db.all(sql`
-        SELECT e.municipio_id
-        FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
-        WHERE pr.producto_id = ${productoId}
-          AND pr.fecha_observacion = ${fecha}
-          AND pr.precio IS NOT NULL
-        GROUP BY e.municipio_id
-        HAVING COUNT(DISTINCT pr.estacion_id) >= ${MIN_COBERTURA_PRODUCTO_MUNICIPIO}
-      `)) as unknown as Array<{ municipio_id: string }>;
-      for (const fila of filas) {
-        coberturaMunicipio.push({ municipio_id: fila.municipio_id, producto_id: productoId });
-      }
-    }
+    // Combustible + municipio — DESACTIVADO (feb 2026): 3.181 URLs de
+    // casi-duplicados saturaban el crawl budget de un dominio nuevo
+    // ("Descubierta: actualmente sin indexar" +6.400 en Search Console).
+    // La query y el mapeo se conservan comentados para re-activarlos con
+    // solo descomentar cuando las páginas base estén indexadas.
+    // const coberturaMunicipio: Array<{ municipio_id: string; producto_id: number }> = [];
+    // for (const { productoId, fecha } of coberturas) {
+    //   const filas = (await db.all(sql`
+    //     SELECT e.municipio_id
+    //     FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
+    //     WHERE pr.producto_id = ${productoId}
+    //       AND pr.fecha_observacion = ${fecha}
+    //       AND pr.precio IS NOT NULL
+    //     GROUP BY e.municipio_id
+    //     HAVING COUNT(DISTINCT pr.estacion_id) >= ${MIN_COBERTURA_PRODUCTO_MUNICIPIO}
+    //   `)) as unknown as Array<{ municipio_id: string }>;
+    //   for (const fila of filas) {
+    //     coberturaMunicipio.push({ municipio_id: fila.municipio_id, producto_id: productoId });
+    //   }
+    // }
+    void MIN_COBERTURA_PRODUCTO_MUNICIPIO; // (referencia viva para re-activar)
 
-    // Slugs de municipios indexables (mismo umbral que el listado general)
-    // NOTA (fix auditoría I3): HAVING sobre una subconsulta escalar NO es
-    // válido en SQLite/libSQL ("HAVING clause on a non-aggregate query") y
-    // hacía que el catch global descartara TODAS las productoURLs (también
-    // las de provincia). GROUP BY + HAVING agregado, semántica idéntica.
-    const municipiosIndexables = (await db.all(sql`
-      SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
-             COUNT(e2.id) AS n_estaciones
-      FROM municipios m
-      JOIN provincias p ON p.id = m.provincia_id
-      JOIN ccaa c ON c.id = p.ccaa_id
-      LEFT JOIN estaciones e2 ON e2.municipio_id = m.id
-      GROUP BY m.id, m.nombre, p.nombre, c.nombre
-      HAVING COUNT(e2.id) >= ${MIN_ESTACIONES_MUNICIPIO}
-    `) as unknown as Array<{
-      id: string;
-      nombre: string;
-      provincia_nombre: string;
-      ccaa_nombre: string;
-      n_estaciones: number;
-    }>);
-    const municipioIndexable = new Map(
-      municipiosIndexables.map((m) => [
-        m.id,
-        { ccaa: slugify(m.ccaa_nombre), prov: slugify(m.provincia_nombre), mun: slugify(m.nombre) },
-      ])
-    );
-
-    for (const fila of coberturaMunicipio) {
-      if (!NOMBRE_PRODUCTO[fila.producto_id]) continue;
-      const m = municipioIndexable.get(fila.municipio_id);
-      if (!m) continue;
-      productoURLs.push({
-        url: `${SITE_URL}/gasolineras/${m.ccaa}/${m.prov}/${m.mun}?producto=${fila.producto_id}`,
-        lastModified: fechaDatos,
-        changeFrequency: "daily",
-        priority: 0.6,
-      });
-    }
+    // const municipiosIndexables = (await db.all(sql`
+    //   SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
+    //          COUNT(e2.id) AS n_estaciones
+    //   FROM municipios m
+    //   JOIN provincias p ON p.id = m.provincia_id
+    //   JOIN ccaa c ON c.id = p.ccaa_id
+    //   LEFT JOIN estaciones e2 ON e2.municipio_id = m.id
+    //   GROUP BY m.id, m.nombre, p.nombre, c.nombre
+    //   HAVING COUNT(e2.id) >= ${MIN_ESTACIONES_MUNICIPIO}
+    // `) as unknown as Array<{
+    //   id: string;
+    //   nombre: string;
+    //   provincia_nombre: string;
+    //   ccaa_nombre: string;
+    //   n_estaciones: number;
+    // }>);
+    // const municipioIndexable = new Map(
+    //   municipiosIndexables.map((m) => [
+    //     m.id,
+    //     { ccaa: slugify(m.ccaa_nombre), prov: slugify(m.provincia_nombre), mun: slugify(m.nombre) },
+    //   ])
+    // );
+    //
+    // for (const fila of coberturaMunicipio) {
+    //   if (!NOMBRE_PRODUCTO[fila.producto_id]) continue;
+    //   const m = municipioIndexable.get(fila.municipio_id);
+    //   if (!m) continue;
+    //   productoURLs.push({
+    //     url: `${SITE_URL}/gasolineras/${m.ccaa}/${m.prov}/${m.mun}?producto=${fila.producto_id}`,
+    //     lastModified: fechaDatos,
+    //     changeFrequency: "daily",
+    //     priority: 0.6,
+    //   });
+    // }
   } catch (error) {
     // DB no disponible en build time — solo páginas estáticas.
     // Log de diagnóstico (auditoría I3): un error silencioso aquí descartaba

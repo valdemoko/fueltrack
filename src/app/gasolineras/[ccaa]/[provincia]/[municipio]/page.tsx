@@ -70,6 +70,10 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const producto = Number.isInteger(productoId)
     ? await getProductoById(productoId)
     : null;
+  // Producto pedida en la URL pero sin datos: noindex, follow (la página
+  // renderiza el listado base pero no es una variante indexable válida).
+  const productoInvalida =
+    productoParam !== undefined && (!Number.isInteger(productoId) || !producto);
 
   const municipioDisplay = tituloMunicipio(municipio.nombre);
 
@@ -90,6 +94,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   return {
     title: titulo,
     description: descripcion,
+    robots: productoInvalida ? { index: false, follow: true } : undefined,
     alternates: { canonical },
     openGraph: { title: titulo, description: descripcion, type: "website" },
   };

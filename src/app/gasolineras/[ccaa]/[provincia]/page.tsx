@@ -57,6 +57,11 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const producto = Number.isInteger(productoId)
     ? await getProductoById(productoId)
     : null;
+  // Producto pedida en la URL pero sin datos: la página renderiza el listado
+  // base (no es error), pero debe ser noindex para que Google no la considere
+  // una variante indexable sin contenido propio (soft-404/duplicado).
+  const productoInvalida =
+    productoParam !== undefined && (!Number.isInteger(productoId) || !producto);
 
   const base = `gasolineras/${ccaaSlug}/${provinciaSlug}`;
   let titulo: string;
@@ -75,6 +80,7 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   return {
     title: titulo,
     description: descripcion,
+    robots: productoInvalida ? { index: false, follow: true } : undefined,
     alternates: { canonical },
     openGraph: { title: titulo, description: descripcion, type: "website" },
   };
