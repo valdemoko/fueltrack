@@ -8,9 +8,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Política de Cookies — FuelTrack",
+  title: "Política de Cookies",
   description:
     "Política de cookies de FuelTrack. Información sobre las cookies utilizadas y cómo gestionarlas.",
+  alternates: { canonical: "/politica-cookies" },
 };
 
 export default function PoliticaCookiesPage() {

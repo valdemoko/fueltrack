@@ -15,25 +15,18 @@
  */
 import type { MetadataRoute } from "next";
 import { sql } from "drizzle-orm";
-import { db, isTurso } from "@/lib/db";
-import { unstable_cache } from "next/cache";
+import { db } from "@/lib/db";
 import { SITE_URL } from "@/lib/siteConfig";
 import { slugify } from "@/lib/geografia";
 
-/**
- * El sitemap se sirve de caché (24 h): Google lo pide a diario y NO debe
- * ejecutar las consultas completas contra Turso en cada rastreo.
- * Coste real: ~1 pasada al día (~40k lecturas acotadas).
- */
-const sitemapCacheado = unstable_cache(
-  async (): Promise<MetadataRoute.Sitemap> => generarSitemap(),
-  ["fueltrack-sitemap"],
-  { revalidate: 86400 }
-);
 
 export default function sitemap(): Promise<MetadataRoute.Sitemap> {
-  // En local (file:) sin caché de Next; en producción (Turso) cacheado 24 h
-  return isTurso ? sitemapCacheado() : generarSitemap();
+  // SIN unstable_cache adicional: la propia ruta /sitemap.xml es estática ISR
+  // con revalidate 24 h (configurada por Next para MetadataRoute.Sitemap),
+  // así que las queries solo se ejecutan ~1 vez/día. La doble capa de caché
+  // además TRAGABA las URLs de municipio+producto en el prerender del build
+  // (silenciosamente, sin excepción): sin ella el sitemap sale completo.
+  return generarSitemap();
 }
 
 /** Municipio: mínimo de estaciones para incluir el municipio y sus estaciones. */
@@ -75,6 +68,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE_URL}/precios`, lastModified: fechaDatos, changeFrequency: "weekly", priority: 0.7 },
     { url: `${SITE_URL}/mapa`, lastModified: fechaDatos, changeFrequency: "daily", priority: 0.7 },
     { url: `${SITE_URL}/metodologia`, lastModified: fechaDatos, changeFrequency: "monthly", priority: 0.5 },
+    { url: `${SITE_URL}/autor`, lastModified: fechaDatos, changeFrequency: "monthly", priority: 0.3 },
     { url: `${SITE_URL}/aviso-legal`, lastModified: fechaDatos, changeFrequency: "yearly", priority: 0.2 },
     { url: `${SITE_URL}/politica-privacidad`, lastModified: fechaDatos, changeFrequency: "yearly", priority: 0.2 },
     { url: `${SITE_URL}/politica-cookies`, lastModified: fechaDatos, changeFrequency: "yearly", priority: 0.2 },
@@ -219,14 +213,20 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     }
 
     // Slugs de municipios indexables (mismo umbral que el listado general)
+    // NOTA (fix auditoría I3): HAVING sobre una subconsulta escalar NO es
+    // válido en SQLite/libSQL ("HAVING clause on a non-aggregate query") y
+    // hacía que el catch global descartara TODAS las productoURLs (también
+    // las de provincia). GROUP BY + HAVING agregado, semántica idéntica.
     const municipiosIndexables = (await db.all(sql`
       SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
-             (SELECT COUNT(*) FROM estaciones e2 WHERE e2.municipio_id = m.id) AS n_estaciones
+             COUNT(e2.id) AS n_estaciones
       FROM municipios m
       JOIN provincias p ON p.id = m.provincia_id
       JOIN ccaa c ON c.id = p.ccaa_id
-      HAVING n_estaciones >= ${MIN_ESTACIONES_MUNICIPIO}
-    `) as Array<{
+      LEFT JOIN estaciones e2 ON e2.municipio_id = m.id
+      GROUP BY m.id, m.nombre, p.nombre, c.nombre
+      HAVING COUNT(e2.id) >= ${MIN_ESTACIONES_MUNICIPIO}
+    `) as unknown as Array<{
       id: string;
       nombre: string;
       provincia_nombre: string;
@@ -251,8 +251,15 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
         priority: 0.6,
       });
     }
-  } catch {
-    // DB no disponible en build time — solo páginas estáticas
+  } catch (error) {
+    // DB no disponible en build time — solo páginas estáticas.
+    // Log de diagnóstico (auditoría I3): un error silencioso aquí descartaba
+    // TODAS las productoURLs sin dejar rastro.
+    console.error(
+      "[sitemap] Error generando URLs de producto:",
+      error instanceof Error ? error.message : error
+    );
+    if (process.env.SITEMAP_DEBUG === "1") throw error; // diagnóstico
   }
 
   // ─── Estaciones: top por municipio (staged) ─────────────────────────────

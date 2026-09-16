@@ -57,12 +57,14 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
     await params;
   const { producto: productoParam } = await searchParams;
 
+  // notFound() en metadata: garantiza un 404 HTTP real para slugs inválidos
+  // (misma técnica que /estacion/[id]; evita soft-404 indexables).
   const ccaa = await getCcaaBySlug(ccaaSlug);
-  if (!ccaa) return { title: "Municipio no encontrado" };
+  if (!ccaa) notFound();
   const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
-  if (!provincia) return { title: "Municipio no encontrado" };
+  if (!provincia) notFound();
   const municipio = await getMunicipioBySlug(municipioSlug, provincia.id);
-  if (!municipio) return { title: "Municipio no encontrado" };
+  if (!municipio) notFound();
 
   const productoId = Number(productoParam);
   const producto = Number.isInteger(productoId)

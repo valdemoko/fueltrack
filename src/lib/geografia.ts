@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
+import { slugify } from "@/lib/slug";
+
+// Reexporta slugify para no romper los imports existentes (@/lib/geografia).
+export { slugify };
 
 /**
  * Convierte un nombre de municipio a formato de título para mostrar:
@@ -26,15 +30,8 @@ export function tituloMunicipio(nombre: string): string {
 /**
  * Normaliza un nombre a slug URL estable:
  * minúsculas, sin acentos, separadores con guion.
+ * (Implementación canónica en @/lib/slug; reexportada aquí.)
  */
-export function slugify(nombre: string): string {
-  return nombre
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
 
 /**
  * Busca una CCAA por slug URL (coincidencia sin acentos, case-insensitive).

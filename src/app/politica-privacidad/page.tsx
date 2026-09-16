@@ -8,9 +8,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Política de Privacidad — FuelTrack",
+  title: "Política de Privacidad",
   description:
     "Política de privacidad de FuelTrack. Información sobre el tratamiento de datos personales conforme al RGPD.",
+  alternates: { canonical: "/politica-privacidad" },
 };
 
 export default function PoliticaPrivacidadPage() {
@@ -30,7 +31,7 @@ export default function PoliticaPrivacidadPage() {
           </p>
           <p>
             <strong>Actividad:</strong> Consulta de precios de carburantes en
-            estaciones de servicio de la provincia de Málaga
+            estaciones de servicio de toda España
           </p>
 
           <h2>2. Datos que recopilamos</h2>
@@ -51,10 +52,10 @@ export default function PoliticaPrivacidadPage() {
           <h2>3. Finalidad del tratamiento</h2>
           <p>Los datos se utilizan para:</p>
           <ul>
-            <li>
-              <strong>Proporcionar el servicio:</strong> Mostrar precios de
-              carburantes y estaciones de servicio de Málaga.
-            </li>
+          <p>
+            <strong>Proporcionar el servicio:</strong> Mostrar precios de
+              carburantes y estaciones de servicio de toda España.
+          </p>
             <li>
               <strong>Mejorar el servicio:</strong> Analizar el uso del sitio
               web para mejorar la experiencia del usuario.
@@ -99,8 +100,11 @@ export default function PoliticaPrivacidadPage() {
           <h2>6. Destinatarios de los datos</h2>
           <p>
             <strong>Google AdSense:</strong> Los datos de navegación pueden ser
-            compartidos con Google LLC para la personalización de anuncios.
-            Google actúa como encargado del tratamiento. Más información:{" "}
+            tratados por Google LLC para la prestación del servicio
+            publicitario, incluida la personalización de anuncios cuando usted
+            ha dado su consentimiento. En relación con este tratamiento, Google
+            actúa conforme a sus propias políticas de privacidad. Más
+            información:{" "}
             <a
               href="https://policies.google.com/privacy"
               target="_blank"

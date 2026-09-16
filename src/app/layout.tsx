@@ -23,6 +23,7 @@ const dmSans = DM_Sans({
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+  alternates: { canonical: "/" },
   title: {
     default: `${SITE_NAME} — Precios de carburantes en tiempo real`,
     template: `%s | ${SITE_NAME}`,

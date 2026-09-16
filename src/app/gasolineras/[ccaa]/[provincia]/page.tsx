@@ -46,10 +46,12 @@ export async function generateMetadata({ params, searchParams }: Props): Promise
   const { ccaa: ccaaSlug, provincia: provinciaSlug } = await params;
   const { producto: productoParam } = await searchParams;
 
+  // notFound() en metadata: garantiza un 404 HTTP real para slugs inválidos
+  // (misma técnica que /estacion/[id]; evita soft-404 indexables).
   const ccaa = await getCcaaBySlug(ccaaSlug);
-  if (!ccaa) return { title: "Provincia no encontrada" };
+  if (!ccaa) notFound();
   const provincia = await getProvinciaBySlug(provinciaSlug, ccaa.id);
-  if (!provincia) return { title: "Provincia no encontrada" };
+  if (!provincia) notFound();
 
   const productoId = Number(productoParam);
   const producto = Number.isInteger(productoId)
@@ -242,12 +244,21 @@ export default async function ProvinciaPage({ params, searchParams }: Props) {
             <div className="border border-stone-200 rounded-lg p-4 text-center">
               <p className="text-sm text-stone-500 mb-1">Horquilla provincial</p>
               <p className="text-2xl font-bold text-stone-900">
-                {productoSeleccionado
-                  ? `${productoSeleccionado.precioMedio !== null ? "" : ""}`
-                  : ""}
-                {baratas[0]?.precio?.toFixed(3) ?? "—"}
+                {(() => {
+                  // Horquilla calculada EN MEMORIA a partir de los datos que
+                  // getMunicipiosDeProvincia ya devuelve (precioMin/precioMax
+                  // por municipio). Sin consultas adicionales.
+                  const mins = municipios
+                    .map((m) => m.precioMin)
+                    .filter((p): p is number => p !== null);
+                  const maxs = municipios
+                    .map((m) => m.precioMax)
+                    .filter((p): p is number => p !== null);
+                  if (mins.length === 0 || maxs.length === 0) return "—";
+                  return `${Math.min(...mins).toFixed(3)} – ${Math.max(...maxs).toFixed(3)}`;
+                })()}
               </p>
-              <p className="text-xs text-stone-400 mt-1">mínimo provincial</p>
+              <p className="text-xs text-stone-400 mt-1">mínimo – máximo provincial</p>
             </div>
           </div>
 

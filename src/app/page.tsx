@@ -1,9 +1,39 @@
 import Link from "next/link";
 import { Map, BarChart3, Clock, Database } from "lucide-react";
+import { SITE_URL, SITE_NAME } from "@/lib/siteConfig";
+
+// JSON-LD de la home: WebSite + Organization con los datos verificables
+// del sitio (nombre, URL, contacto publicado en aviso legal). Sin inventar
+// logos ni redes sociales inexistentes (auditoría I14).
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": `${SITE_URL}/#website`,
+      url: SITE_URL,
+      name: SITE_NAME,
+      inLanguage: "es",
+      publisher: { "@id": `${SITE_URL}/#organization` },
+    },
+    {
+      "@type": "Organization",
+      "@id": `${SITE_URL}/#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      email: "contacto@fueltrack.site",
+      founder: { "@id": `${SITE_URL}/autor#person` },
+    },
+  ],
+};
 
 export default function HomePage() {
   return (
     <div className="min-h-screen">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       {/* Hero */}
       <section className="relative overflow-hidden bg-stone-950 text-white">
         {/* Subtle grid texture */}

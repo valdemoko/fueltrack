@@ -127,14 +127,15 @@ export default async function MetodologiaPage() {
           <section>
             <h2>5. Actualización automática</h2>
             <p>
-              La actualización se ejecuta de forma programada mediante un cron
-              (cada 30 minutos en producción, a través de Vercel Cron). El
-              proceso recorre las 52 provincias; si alguna falla, se registra
-              el error y se continua con las demás en la siguiente ejecución.
-              Cada ejecución es un <em>upsert</em>: las estaciones nuevas se
-              añaden, las existentes se actualizan y los precios de cada día se
-              almacenan como observaciones históricas. No se eliminan datos
-              anteriores válidos.
+              La actualización se ejecuta de forma programada una vez al día
+              (a las 06:00 UTC, mediante Vercel Cron), justo después de que la
+              fuente oficial publica los precios del día. El proceso recorre
+              las 52 provincias; si alguna falla, se registra el error y se
+              continua con las demás en la siguiente ejecución. Cada ejecución
+              es un <em>upsert</em>: las estaciones nuevas se añaden, las
+              existentes se actualizan y los precios de cada día se almacenan
+              como observaciones históricas. No se eliminan datos anteriores
+              válidos.
             </p>
           </section>
 

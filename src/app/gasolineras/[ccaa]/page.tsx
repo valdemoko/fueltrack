@@ -23,7 +23,9 @@ interface Props {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { ccaa: ccaaSlug } = await params;
   const ccaa = await getCcaaBySlug(ccaaSlug);
-  if (!ccaa) return { title: "Comunidad no encontrada" };
+  // notFound() en metadata: garantiza un 404 HTTP real para slugs inválidos
+  // (misma técnica que /estacion/[id]; evita soft-404 indexables).
+  if (!ccaa) notFound();
 
   const titulo = `Gasolineras en ${ccaa.nombre} — Estaciones y precios por provincia`;
   const descripcion = `Estaciones de servicio en ${ccaa.nombre} por provincia: número de gasolineras, precios medios de gasolina y gasóleo. Datos oficiales del MITECO.`;

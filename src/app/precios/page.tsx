@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import { BarChart3, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -382,12 +383,54 @@ export default function PreciosPage() {
             publicación del ministerio.
           </p>
           <p>
-            Los datos históricos están disponibles como snapshots diarios
-            desde el 1 de enero de 2007. El gráfico muestra la evolución
+            El histórico se construye con observaciones diarias reales
+            registradas por el sistema desde que comenzó su ingesta: no hay
+            estimaciones ni interpolaciones. El gráfico muestra la evolución
             del precio medio del área seleccionada para el combustible
-            elegido.
+            elegido, y la serie se alarga día a día.
           </p>
         </div>
+
+        {/* Bloque descriptivo SSR (indexable): explica la herramienta sin
+            depender de JavaScript y responde a la intención de búsqueda
+            "precios de carburantes" (auditoría I15). Texto estático: no
+            añade consultas a la base de datos. */}
+        <section className="mt-12 max-w-3xl text-stone-600 leading-relaxed space-y-4">
+          <h2 className="font-display text-2xl font-bold text-stone-900">
+            Cómo usar esta herramienta de precios
+          </h2>
+          <p>
+            Esta herramienta permite consultar el precio medio, mínimo y máximo
+            de los carburantes en España y filtrarlo por comunidad autónoma,
+            provincia y municipio. Al seleccionar un área, las tarjetas
+            superiores muestran la estadística calculada sobre las estaciones
+            con precio publicado en la última observación oficial disponible.
+          </p>
+          <p>
+            Los combustibles disponibles incluyen gasolina 95 E5, gasolina 98
+            E5, gasóleo A habitual y gasóleo premium, entre otros productos
+            que comunican las estaciones al ministerio. El histórico permite
+            comparar la evolución del precio medio del área seleccionada en
+            cinco periodos: un mes, tres meses, seis meses, un año y dos años.
+          </p>
+          <p>
+            Todos los datos provienen de la fuente oficial (MITECO, licencia
+            CC BY 4.0) y se actualizan a diario mediante un proceso automático.
+            Si buscas una estación concreta, puedes usar el{" "}
+            <Link href="/gasolineras" className="text-amber-600 hover:text-amber-700">
+              listado de gasolineras por municipio
+            </Link>{" "}
+            o el{" "}
+            <Link href="/mapa" className="text-amber-600 hover:text-amber-700">
+              mapa interactivo
+            </Link>
+            . Para entender cómo se calculan las medias, consulta la{" "}
+            <Link href="/metodologia" className="text-amber-600 hover:text-amber-700">
+              metodología de datos
+            </Link>
+            .
+          </p>
+        </section>
       </main>
     </div>
   );

@@ -14,6 +14,7 @@ export const metadata: Metadata = {
   title: "Contacto",
   description:
     "Información de contacto para consultas sobre precios de carburantes y el sitio web.",
+  alternates: { canonical: "/contacto" },
 };
 
 export default function ContactoPage() {

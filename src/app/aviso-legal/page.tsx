@@ -6,9 +6,10 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Aviso legal — FuelTrack",
+  title: "Aviso legal",
   description:
     "Aviso legal de FuelTrack. Información sobre el titular del sitio web, condiciones de uso y propiedad intelectual.",
+  alternates: { canonical: "/aviso-legal" },
 };
 
 export default function AvisoLegalPage() {
@@ -34,7 +35,7 @@ export default function AvisoLegalPage() {
             </li>
             <li>
               <strong>Actividad:</strong> Consulta de precios de carburantes en
-              estaciones de servicio de la provincia de Málaga
+              estaciones de servicio de toda España
             </li>
           </ul>
 
@@ -51,10 +52,10 @@ export default function AvisoLegalPage() {
           <p>
             Todos los contenidos de este sitio web (textos, imágenes, gráficos,
             iconos, tecnología, software, enlaces y otros contenidos
-            audiovisuales o sonoros) son propiedad intelectual de Combustible
-            Málaga o de terceros, sin que puedan entenderse cedidos al Usuario
-            ninguno de los derechos de explotación reconocidos por la normativa
-            vigente sobre propiedad intelectual.
+            audiovisuales o sonoros) son propiedad intelectual de FuelTrack o de
+            terceros, sin que puedan entenderse cedidos al Usuario ninguno de
+            los derechos de explotación reconocidos por la normativa vigente
+            sobre propiedad intelectual.
           </p>
           <p>
             Las marcas, nombres comerciales o signos distintivos son titularidad

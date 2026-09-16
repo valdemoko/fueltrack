@@ -24,6 +24,7 @@ export default function AutorPage() {
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "Person",
+    "@id": `${SITE_URL}/autor#person`,
     name: "Miguel Iglesias Valenzuela",
     url: `${SITE_URL}/autor`,
     sameAs: [LINKEDIN_URL],
@@ -51,7 +52,7 @@ export default function AutorPage() {
         </nav>
 
         <h1 className="font-display text-3xl font-bold text-stone-900 mb-8">
-          About the Author
+          Sobre el autor
         </h1>
 
         <div className="card p-6 md:p-8 space-y-6">

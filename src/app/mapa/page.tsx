@@ -5,6 +5,7 @@ export const metadata: Metadata = {
   title: "Mapa de estaciones de servicio",
   description:
     "Mapa interactivo con las estaciones de servicio y precios de carburantes en tiempo real. Datos oficiales del MITECO.",
+  alternates: { canonical: "/mapa" },
   openGraph: {
     title: "Mapa de estaciones — FuelTrack",
     description:
