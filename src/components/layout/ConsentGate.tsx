@@ -37,20 +37,38 @@ function readConsent(detail: ConsentDetail): {
 }
 
 /**
- * Carga AdSense y Google Analytics 4 únicamente cuando CookieYes otorga
- * consentimiento (eventos cookieyes_banner_load / cookieyes_consent_update).
- * Sin consentimiento, los scripts no existen en el DOM.
+ * Carga AdSense y Google Analytics 4 únicamente cuando existe consentimiento
+ * válido. Dos modos, según configuración:
  *
- * Requiere que la clave de CookieYes esté configurada (NEXT_PUBLIC_COOKIEYES_CLIENT_KEY).
- * Si no lo está, no se carga ningún script publicitario ni analítico.
+ * 1. CookieYes configurada (NEXT_PUBLIC_COOKIEYES_CLIENT_KEY): escucha los
+ *    eventos cookieyes_banner_load / cookieyes_consent_update y respeta la
+ *    categoría otorgada (advertisement / analytics).
+ * 2. Sin CookieYes (fallback): respeta la cookie `cookie_consent` que escribe
+ *    el banner propio (CookieConsent). Sin decisión previa NO se carga nada.
+ *
+ * En ambos modos, sin consentimiento los scripts no existen en el DOM.
  */
 export function ConsentGate() {
   const [advertisement, setAdvertisement] = useState(false);
   const [analytics, setAnalytics] = useState(false);
 
   useEffect(() => {
-    if (!cookieYesEnabled) return;
+    // ─── Modo fallback: banner propio (cookie `cookie_consent`) ───────────
+    if (!cookieYesEnabled) {
+      try {
+        const match = document.cookie.match(/(?:^|; )cookie_consent=([^;]*)/);
+        if (match) {
+          const state = JSON.parse(decodeURIComponent(match[1]));
+          setAdvertisement(state.advertising === true);
+          setAnalytics(state.analytics === true);
+        }
+      } catch {
+        // cookie corrupta o acceso bloqueado → sin consentimiento
+      }
+      return;
+    }
 
+    // ─── Modo CookieYes ──────────────────────────────────────────────────
     const applyConsent = (event: Event) => {
       const detail = (event as CustomEvent<ConsentDetail>).detail;
       if (!detail) return;

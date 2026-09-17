@@ -6,7 +6,8 @@
  *   - /gasolineras (España) + CCAA + provincias + municipios con estaciones
  *   - Variantes combustible+provincia SOLO con cobertura real (>= 50 estaciones
  *     con precio del producto en la provincia)
- *   - Estaciones (tope escalonado, se ampliará según Search Console)
+ *   - Estaciones (tope escalonado, se ampliará según Search Console) con
+ *     datos recientes: las fichas obsoletas quedan fuera del índice.
  *
  * NO incluye variantes combustible+municipio (?producto= de municipio):
  * son casi-duplicados de la página base del municipio y con un dominio nuevo
@@ -45,6 +46,11 @@ const MIN_COBERTURA_PRODUCTO_PROVINCIA = 50;
  *  bien rastreadas que 5.000 "descubiertas sin indexar". Ampliar cuando
  *  Search Console muestre indexación masiva de la etapa actual. */
 const MAX_ESTACIONES_SITEMAP = 800;
+/** Una estación cuyos datos llevan más de X días sin actualizarse es una
+ *  ficha sin mantenimiento (MITECO suele observar cada 2-7 días): baja utilidad
+ *  individual y riesgo de thin content. Se excluye del sitemap; la página
+ *  sigue existiendo y siendo accesible por navegación (remediación 2026-09). */
+const MAX_DIAS_SIN_ACTUALIZAR_ESTACION = 30;
 
 /** Nombres amigables para las URLs de combustible. */
 const NOMBRE_PRODUCTO: Record<number, string> = {
@@ -283,6 +289,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
           SELECT COUNT(*) FROM estaciones e2
           WHERE e2.municipio_id = e.municipio_id
         ) >= ${MIN_ESTACIONES_MUNICIPIO}
+          AND e.fecha_actualizacion >= date('now', '-${MAX_DIAS_SIN_ACTUALIZAR_ESTACION} days')
         ORDER BY e.fecha_actualizacion DESC
         LIMIT ${MAX_ESTACIONES_SITEMAP}
       `)) as Array<{ id: string; fecha_actualizacion: string }>;
