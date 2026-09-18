@@ -16,8 +16,12 @@ export const metadata: Metadata = {
 
 export default function MapaPage() {
   return (
-    <div className="flex flex-col min-h-screen">
-      <main className="flex-1 flex flex-col">
+    <div>
+      {/* El mapa (Leaflet) exige un contenedor con altura definida: h-full
+          colapsa a 0 dentro de un flex sin altura. Altura de viewport con
+          mínimo usable en móvil, y la sección de contexto debajo con scroll
+          natural de página. */}
+      <main className="h-[70vh] min-h-[480px] flex flex-col">
         <MapaEstacionesLoader />
       </main>
 
