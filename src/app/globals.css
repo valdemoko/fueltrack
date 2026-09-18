@@ -195,6 +195,21 @@
   }
 }
 
+/* ========================================
+   Mapa a pantalla completa (/mapa)
+   Mientras el contenedor .mapa-pantalla-completa esté en el DOM, se bloquea
+   el scroll de la página (el mapa ocupa TODO el viewport bajo el header).
+   La sección "Cómo usar el mapa" y el footer siguen existiendo (SEO/AdSense),
+   pero solo se alcanzan con el botón de info, que libera el scroll añadiendo
+   la clase .mapa-scroll-liberado a <html>.
+   ======================================== */
+html:has(.mapa-pantalla-completa) {
+  overflow: hidden;
+}
+html.mapa-scroll-liberado:has(.mapa-pantalla-completa) {
+  overflow: auto;
+}
+
 /* Leaflet MarkerCluster custom colors */
 .leaflet-marker-cluster .leaflet-marker-cluster-content {
   background-color: #f59e0b !important;

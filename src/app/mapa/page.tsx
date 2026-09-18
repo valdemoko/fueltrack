@@ -1,6 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { MapaEstacionesLoader } from "@/components/mapa/MapaEstacionesLoader";
+import {
+  BotonInfoMapa,
+  BotonVolverAlMapa,
+} from "@/components/mapa/BotonesInfoMapa";
 
 export const metadata: Metadata = {
   title: "Mapa de estaciones de servicio",
@@ -17,19 +21,26 @@ export const metadata: Metadata = {
 export default function MapaPage() {
   return (
     <div>
-      {/* El mapa (Leaflet) exige un contenedor con altura definida: h-full
-          colapsa a 0 dentro de un flex sin altura. Altura de viewport con
-          mínimo usable en móvil, y la sección de contexto debajo con scroll
-          natural de página. */}
-      <main className="h-[70vh] min-h-[480px] flex flex-col">
+      {/* El mapa ocupa TODA la pantalla bajo el header (100dvh − 4rem):
+          no hay scroll de página mientras se ve el mapa. La sección de
+          ayuda y el footer siguen renderizados en el HTML (SEO/AdSense),
+          pero solo se ven con el botón "Cómo se usa", que libera el
+          scroll y desplaza hasta ellos (ver BotonesInfoMapa). */}
+      <main
+        id="mapa"
+        className="mapa-pantalla-completa flex flex-col
+                   h-[calc(100dvh-4rem)]"
+      >
         <MapaEstacionesLoader />
       </main>
 
       {/* Contexto textual SSR (indexable): el mapa es un componente cliente
           sin contenido HTML inicial, así que este bloque explica la
           herramienta para el usuario y para el rastreador. Texto estático:
-          no añade consultas a la base de datos. */}
+          no añade consultas a la base de datos. Se accede con el botón
+          "Cómo se usa" del mapa, que libera el scroll y baja hasta aquí. */}
       <section
+        id="como-usar-mapa"
         aria-label="Sobre este mapa"
         className="max-w-3xl mx-auto px-4 sm:px-6 py-10 text-stone-600 leading-relaxed space-y-4"
       >
@@ -74,6 +85,9 @@ export default function MapaPage() {
             metodología
           </Link>
           .
+        </p>
+        <p>
+          <BotonVolverAlMapa />
         </p>
       </section>
     </div>

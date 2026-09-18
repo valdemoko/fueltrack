@@ -13,6 +13,7 @@ import "leaflet/dist/leaflet.css";
 import { CapaClusterEstaciones, type EstacionMapa } from "./CapaClusterEstaciones";
 import { FiltrosMapa, type FiltroState } from "./FiltrosMapa";
 import { LeyendaPrecios } from "./LeyendaPrecios";
+import { BotonInfoMapa } from "./BotonesInfoMapa";
 import { PRODUCTOS_CLAVE } from "@/lib/types/miteco";
 
 // ─── Centro de España y límites ───────────────────────────────────────────
@@ -301,6 +302,10 @@ export function MapaEstaciones() {
             />
           )}
         </MapContainer>
+
+        {/* Botón de info: baja a la sección "Cómo usar el mapa" (libera el
+            scroll de la página, bloqueado para el modo pantalla completa) */}
+        <BotonInfoMapa />
 
         {/* Leyenda */}
         {data && (

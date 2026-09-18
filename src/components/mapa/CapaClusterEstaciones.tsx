@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useMap } from "react-leaflet";
 import L from "leaflet";
 import Link from "next/link";
@@ -132,16 +132,37 @@ export function CapaClusterEstaciones({
   const grupoRef = useRef<L.MarkerClusterGroup | null>(null);
   const rootsRef = useRef<Root[]>([]);
 
+  /** Desmonta los roots de React de los popups FUERA del ciclo de render.
+   *  React 18+ prohíbe llamar a root.unmount() sincrónicamente mientras
+   *  React está renderizando (limpieza de effects durante un render
+   *  concurrente); diferirlo con setTimeout evita el error
+   *  "Attempted to synchronously unmount a root while React was already
+   *  rendering". Los roots ya están fuera del DOM (la capa se elimina
+   *  antes), así que desmontarlos en el siguiente tick es seguro. */
+  const desmontarRoots = useCallback((roots: Root[]) => {
+    if (roots.length === 0) return;
+    window.setTimeout(() => {
+      for (const r of roots) {
+        try {
+          r.unmount();
+        } catch {
+          // Root ya desmontado: ignorar
+        }
+      }
+    }, 0);
+  }, []);
+
   useEffect(() => {
     if (!map || estaciones.length === 0) return;
 
-    // Limpiar capa anterior
+    // Limpiar capa anterior (los roots se desmontan diferidos, fuera del render)
     if (grupoRef.current) {
       map.removeLayer(grupoRef.current);
       grupoRef.current.clearLayers();
     }
-    rootsRef.current.forEach((r) => r.unmount());
+    const rootsAnteriores = rootsRef.current;
     rootsRef.current = [];
+    desmontarRoots(rootsAnteriores);
 
     const grupo = L.markerClusterGroup({
       chunkedLoading: true,
@@ -184,20 +205,17 @@ export function CapaClusterEstaciones({
         grupoRef.current.clearLayers();
         grupoRef.current = null;
       }
-      // Safe unmount: wrap in try/catch to avoid race condition during React render
-      // "Attempted to synchronously unmount a root while React was already rendering"
-      try {
-        rootsRef.current.forEach((r) => {
-          if (r && typeof r.unmount === 'function') {
-            r.unmount();
-          }
-        });
-      } catch (_) {
-        // Ignored: prevents crash during concurrent rendering / unmount race
-      }
+      // Desmontar los roots de los popups diferidamente: la limpieza del
+      // effect puede ejecutarse mientras React está renderizando (render
+      // concurrente), y un unmount sincrónico ahí provoca el error
+      // "Attempted to synchronously unmount a root while React was already
+      // rendering". Los roots ya no están en el DOM, así que diferirlo es
+      // seguro.
+      const roots = rootsRef.current;
       rootsRef.current = [];
+      desmontarRoots(roots);
     };
-  }, [map, estaciones, precioMin, precioMax]);
+  }, [map, estaciones, precioMin, precioMax, desmontarRoots]);
 
   return null;
 }
