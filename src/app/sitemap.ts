@@ -24,6 +24,7 @@ import { sql } from "drizzle-orm";
 import { db } from "@/lib/db";
 import { SITE_URL } from "@/lib/siteConfig";
 import { slugify } from "@/lib/geografia";
+import { parseFechaActualizacion, esFechaFresca } from "@/lib/fecha";
 
 
 export default function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -281,30 +282,46 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
   try {
     // Barato: sin subqueries sobre precios (la página de estación hace su
     // propio gate 404 en middleware). Criterio: municipio indexable.
-    const filas = (await db
-      .all(sql`
-        SELECT e.id, e.fecha_actualizacion
-        FROM estaciones e
-        WHERE (
-          SELECT COUNT(*) FROM estaciones e2
-          WHERE e2.municipio_id = e.municipio_id
-        ) >= ${MIN_ESTACIONES_MUNICIPIO}
-          AND e.fecha_actualizacion >= date('now', '-${MAX_DIAS_SIN_ACTUALIZAR_ESTACION} days')
-        ORDER BY e.fecha_actualizacion DESC
-        LIMIT ${MAX_ESTACIONES_SITEMAP}
-      `)) as Array<{ id: string; fecha_actualizacion: string }>;
+    const candidatas = (await db.all(sql`
+      SELECT e.id, e.fecha_actualizacion
+      FROM estaciones e
+      WHERE (
+        SELECT COUNT(*) FROM estaciones e2
+        WHERE e2.municipio_id = e.municipio_id
+      ) >= ${MIN_ESTACIONES_MUNICIPIO}
+    `)) as Array<{ id: string; fecha_actualizacion: string }>;
 
-    estaciones = filas.map((e) => {
-      const d = new Date(`${e.fecha_actualizacion}T00:00:00Z`);
-      return {
+    // El filtro de frescura NO se hace en SQL: `fecha_actualizacion` mezcla
+    // ISO y legacy dd/mm/aaaa, y una comparación de texto daba por recientes
+    // fichas de 2025 (ver src/lib/fecha.ts). Se filtra y ordena en memoria
+    // con timestamps reales, y el tope se aplica DESPUÉS de filtrar: con el
+    // LIMIT en SQL, los primeros registros eran casi todos obsoletos y el
+    // sitemap podía quedarse sin ninguna ficha de estación.
+    estaciones = candidatas
+      .map((e) => ({
+        id: e.id,
+        fecha: parseFechaActualizacion(e.fecha_actualizacion),
+      }))
+      .filter(
+        (e): e is { id: string; fecha: Date } =>
+          esFechaFresca(e.fecha, MAX_DIAS_SIN_ACTUALIZAR_ESTACION),
+      )
+      .sort(
+        (a, b) => b.fecha.getTime() - a.fecha.getTime() || (a.id < b.id ? -1 : 1),
+      )
+      .slice(0, MAX_ESTACIONES_SITEMAP)
+      .map((e) => ({
         url: `${SITE_URL}/estacion/${e.id}`,
-        lastModified: Number.isNaN(d.getTime()) ? fechaDatos : d,
+        lastModified: e.fecha,
         changeFrequency: "weekly" as const,
         priority: 0.4,
-      };
-    });
-  } catch {
-    // sin datos de estaciones
+      }));
+  } catch (error) {
+    // El sitemap se genera igualmente, sin las fichas de estación.
+    console.error(
+      "[sitemap] Falló la consulta de estaciones; se continúa sin ellas:",
+      error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+    );
   }
 
   return [...estaticas, ...geo, ...productoURLs, ...estaciones];
