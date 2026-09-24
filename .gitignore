@@ -49,3 +49,4 @@ next-env.d.ts
 
 # Freebuff (agente local)
 .freebuff/
+.neon
