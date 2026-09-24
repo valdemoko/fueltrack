@@ -10,12 +10,20 @@ Arquitectura preparada para escalabilidad: Málaga → Andalucía → España.
 
 | Componente | Versión | Notas |
 |---|---|---|
-| Next.js | 15.1.x | App Router, modo `src/` |
+| Next.js | 15.x | App Router, modo `src/` |
 | React | 19.x | — |
 | TypeScript | 5.7.x | Strict mode |
 | Tailwind CSS | 3.4.x | PostCSS + Autoprefixer |
 | ESLint | 9.x | Flat config, `eslint-config-next` |
 | lucide-react | 1.44.x | Iconografía SVG |
+| PostgreSQL en **Neon** | 18 | `@neondatabase/serverless` (HTTP) + Drizzle ORM |
+| Vitest | 5.x | Pruebas unitarias |
+
+> El motor anterior era Turso (libSQL). Se migró a Neon porque Turso cobra por
+> fila escrita y **cuenta cada entrada de índice**: con claves primarias
+> compuestas de 3-4 columnas, cada fila costaba entre 4 y 7 escrituras, y un
+> solo trasvase de 2,5 M de filas agotó el cupo mensual del plan gratuito.
+> El funcionamiento diario y las trampas de Neon están en `README.md`.
 
 ## Fuente de datos
 

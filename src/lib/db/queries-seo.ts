@@ -13,7 +13,7 @@
  * Todas las funciones van cacheadas: N requests → ≤1 lectura real.
  */
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, queryAll, queryGet } from "@/lib/db";
 import {
   cacheada,
   REVALIDATE_PRECIOS,
@@ -36,7 +36,7 @@ import { slugify } from "@/lib/geografia";
 export async function getUltimasFechasProductos(): Promise<Record<number, string>> {
   return cacheada(
     async () => {
-      const productos = (await db.all(
+      const productos = (await queryAll(
         sql`SELECT id FROM productos WHERE EXISTS (
           SELECT 1 FROM precios WHERE precios.producto_id = productos.id
         )`
@@ -44,7 +44,7 @@ export async function getUltimasFechasProductos(): Promise<Record<number, string
 
       const mapa: Record<number, string> = {};
       for (const p of productos) {
-        const rows = (await db.all(
+        const rows = (await queryAll(
           sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
         )) as unknown as Array<{ fecha: string }>;
         if (rows[0]?.fecha) mapa[p.id] = rows[0].fecha;
@@ -97,7 +97,7 @@ async function coberturaProductosInterna(
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string },
   minEstaciones: number
 ): Promise<CoberturaProducto[]> {
-  const productos = (await db.all(
+  const productos = (await queryAll(
     sql`SELECT id, nombre, abreviatura FROM productos WHERE EXISTS (
           SELECT 1 FROM precios WHERE precios.producto_id = productos.id
         )`
@@ -107,7 +107,7 @@ async function coberturaProductosInterna(
 
   for (const producto of productos) {
     // Seek directo a la última fecha del producto (índice producto+fecha)
-    const fechaRow = (await db.get(
+    const fechaRow = (await queryGet(
       sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${producto.id}`
     )) as unknown as { fecha: string } | undefined;
     if (!fechaRow?.fecha) continue;
@@ -122,9 +122,9 @@ async function coberturaProductosInterna(
           ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
           : sql``;
 
-    const stats = (await db.get(sql`
-      SELECT COUNT(DISTINCT pr.estacion_id) AS con_precio,
-             ROUND(AVG(pr.precio), 4) AS precio_medio
+    const stats = (await queryGet(sql`
+      SELECT COUNT(DISTINCT pr.estacion_id)::int AS con_precio,
+             ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio
       FROM precios pr
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE pr.producto_id = ${producto.id}
@@ -175,12 +175,12 @@ export async function getEstacionesMunicipioProducto(
 ): Promise<EstacionMunicipioProducto[]> {
   return cacheada(
     async () => {
-      const refRow = (await db.get(
+      const refRow = (await queryGet(
         sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${productoId}`
       )) as unknown as { fecha: string } | undefined;
       const fechaReferencia = refRow?.fecha ?? null;
 
-      const filas = (await db.all(sql`
+      const filas = (await queryAll(sql`
     SELECT
       e.id, e.rotulo, e.direccion, e.localidad,
       m.nombre AS municipio_nombre,
@@ -252,7 +252,7 @@ async function municipiosCercanosInterna(
   limite: number,
   radioKm: number
 ): Promise<MunicipioCercano[]> {
-  const centro = (await db.all(sql`
+  const centro = (await queryAll(sql`
     SELECT m.id, m.nombre, p.ccaa_id, p.id AS provincia_id,
            (SELECT AVG(e.latitud) FROM estaciones e WHERE e.municipio_id = m.id) AS lat,
            (SELECT AVG(e.longitud) FROM estaciones e WHERE e.municipio_id = m.id) AS lon
@@ -275,14 +275,15 @@ async function municipiosCercanosInterna(
   const cos = Math.cos((c.lat * Math.PI) / 180) || 1;
   const dLon = radioKm / (111 * cos);
 
-  const vecinos = (await db.all(sql`
+  const vecinos = (await queryAll(sql`
     SELECT * FROM (
       SELECT
         m2.id, m2.nombre,
-        COUNT(e.id) AS total_estaciones,
+        COUNT(e.id)::int AS total_estaciones,
         AVG(e.latitud) AS lat, AVG(e.longitud) AS lon,
         (
-          6371 * acos(MIN(1.0,
+          -- LEAST, no MIN: en Postgres MIN() es un agregado de un argumento.
+          6371 * acos(LEAST(1.0,
             COS(RADIANS(${c.lat})) * COS(RADIANS(AVG(e.latitud))) *
             COS(RADIANS(AVG(e.longitud)) - RADIANS(${c.lon})) +
             SIN(RADIANS(${c.lat})) * SIN(RADIANS(AVG(e.latitud)))
@@ -297,7 +298,7 @@ async function municipiosCercanosInterna(
             AND longitud BETWEEN ${c.lon - dLon} AND ${c.lon + dLon}
         )
       GROUP BY m2.id, m2.nombre
-      HAVING total_estaciones > 0
+      HAVING COUNT(e.id) > 0
     )
     WHERE distancia_km <= ${radioKm}
     ORDER BY distancia_km ASC
@@ -312,7 +313,7 @@ async function municipiosCercanosInterna(
   if (vecinos.length === 0) return [];
 
   const ids = vecinos.map((v) => v.id);
-  const slugRows = (await db.all(sql`
+  const slugRows = (await queryAll(sql`
     SELECT m.id, c.nombre AS ccaa_nombre, p.nombre AS provincia_nombre
     FROM municipios m
     JOIN provincias p ON p.id = m.provincia_id
@@ -392,7 +393,7 @@ export async function getHistoricoAmbito(
       // ── Serie diaria (hist_geo_dia) para ventanas ≤ 30 días ──
       if (dias <= 30) {
         const { ambitoTipo, geoId } = resolverAmbito(ambito);
-        const serie = (await db.all(sql`
+        const serie = (await queryAll(sql`
           SELECT fecha, precio_medio AS precio, n_estaciones AS n
           FROM hist_geo_dia
           WHERE ambito = ${ambitoTipo}
@@ -417,7 +418,7 @@ export async function getHistoricoAmbito(
       if (dias <= 190) {
         const { ambitoTipo, geoId } = resolverAmbito(ambito);
         if (ambitoTipo !== "nac") {
-          const semana = (await db.all(sql`
+          const semana = (await queryAll(sql`
             SELECT semana AS fecha, precio_medio AS precio, n_estaciones AS n
             FROM hist_geo_semana
             WHERE ambito = ${ambitoTipo}
@@ -442,7 +443,7 @@ export async function getHistoricoAmbito(
       const mesDesde = desde.slice(0, 7);
       let serie: Array<{ mes: string; precio: number }>;
       if (ambito.municipioId) {
-        serie = (await db.all(sql`
+        serie = (await queryAll(sql`
           SELECT mes, precio_medio AS precio FROM hist_mun_mes
           WHERE municipio_id = ${ambito.municipioId}
             AND producto_id = ${productoId}
@@ -450,7 +451,7 @@ export async function getHistoricoAmbito(
           ORDER BY mes ASC
         `)) as unknown as Array<{ mes: string; precio: number }>;
       } else if (ambito.provinciaId) {
-        serie = (await db.all(sql`
+        serie = (await queryAll(sql`
           SELECT mes, precio_medio AS precio FROM hist_prov_mes
           WHERE provincia_id = ${ambito.provinciaId}
             AND producto_id = ${productoId}
@@ -458,7 +459,7 @@ export async function getHistoricoAmbito(
           ORDER BY mes ASC
         `)) as unknown as Array<{ mes: string; precio: number }>;
       } else if (ambito.ccaaId) {
-        serie = (await db.all(sql`
+        serie = (await queryAll(sql`
           SELECT mes, precio_medio AS precio FROM hist_ccaa_mes
           WHERE ccaa_id = ${ambito.ccaaId}
             AND producto_id = ${productoId}
@@ -467,7 +468,7 @@ export async function getHistoricoAmbito(
         `)) as unknown as Array<{ mes: string; precio: number }>;
       } else {
         // Nacional largo: la serie diaria permanente da mejor resolución
-        const serieDia = (await db.all(sql`
+        const serieDia = (await queryAll(sql`
           SELECT fecha, precio_medio AS precio FROM hist_nac_dia
           WHERE producto_id = ${productoId}
             AND fecha >= ${desde}
@@ -480,7 +481,7 @@ export async function getHistoricoAmbito(
             dias
           );
         }
-        serie = (await db.all(sql`
+        serie = (await queryAll(sql`
           SELECT mes, AVG(precio_medio) AS precio FROM (
             SELECT mes, precio_medio FROM hist_prov_mes
             WHERE producto_id = ${productoId} AND mes >= ${mesDesde}
@@ -554,7 +555,7 @@ function resumenDesdeSerie(
 export async function getProductoById(
   productoId: number
 ): Promise<{ id: number; nombre: string; abreviatura: string } | null> {
-  const row = (await db.all(
+  const row = (await queryAll(
     sql`SELECT id, nombre, abreviatura FROM productos WHERE id = ${productoId}`
   )) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
   return row[0] ?? null;

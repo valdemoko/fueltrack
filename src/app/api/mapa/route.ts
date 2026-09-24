@@ -17,7 +17,7 @@
  *   - limite: máx estaciones (default: 15000 — toda España)
  */
 import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { db, queryAll } from "@/lib/db";
 import { sql, and, type SQL } from "drizzle-orm";
 
 export async function GET(request: Request) {
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
       .select({ fecha: sql<string>`MAX(fecha_observacion)` })
       .from(sql`precios`)
       .where(sql`producto_id = ${producto}`)
-      .get()) as { fecha: string } | undefined;
+      .execute())[0] as { fecha: string } | undefined;
 
     const fechaPrecios = maxFechaRow?.fecha ?? null;
 
@@ -81,7 +81,7 @@ export async function GET(request: Request) {
       condiciones.push(sql`e.municipio_id = ${municipioId}`);
     }
     if (municipio) {
-      condiciones.push(sql`e.localidad LIKE ${`%${municipio}%`}`);
+      condiciones.push(sql`e.localidad ILIKE ${`%${municipio}%`}`);
     }
     condiciones.push(...bboxConds);
     if (provinciaId) {
@@ -96,7 +96,7 @@ export async function GET(request: Request) {
     // por rango de índice → seek directo al último precio.
     // Payload mínimo: solo los campos que el pin/popup necesitan.
     // (direccion y horario se consultan en la página de la estación)
-    const filas = (await db.all(sql`
+    const filas = (await queryAll(sql`
         SELECT
           e.id,
           e.rotulo,

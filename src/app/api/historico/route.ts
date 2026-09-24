@@ -56,11 +56,11 @@ export async function GET(request: Request) {
 
     // ── Modo 1: por estación individual ──
     if (estacionId) {
-      const estacion = await db
+      const estacion = (await db
         .select()
         .from(schema.estaciones)
         .where(eq(schema.estaciones.id, estacionId))
-        .get();
+        .execute())[0];
 
       if (!estacion) {
         return NextResponse.json(
@@ -69,11 +69,11 @@ export async function GET(request: Request) {
         );
       }
 
-      const producto = await db
+      const producto = (await db
         .select()
         .from(schema.productos)
         .where(eq(schema.productos.id, productoIdNum))
-        .get();
+        .execute())[0];
 
       // Arquitectura de cuotas: el detalle diario vive en precios_historico
       // (ventana ~32 días). Ventanas largas → serie mensual permanente.
@@ -97,7 +97,7 @@ export async function GET(request: Request) {
             )
             .orderBy(desc(schema.preciosHistorico.fecha))
             .limit(limite)
-            .all()
+            .execute()
         : await db
             .select({
               fecha: schema.histEstacionMes.mes,
@@ -114,7 +114,7 @@ export async function GET(request: Request) {
             )
             .orderBy(desc(schema.histEstacionMes.mes))
             .limit(limite)
-            .all();
+            .execute();
 
       return NextResponse.json({
         estacion: {
@@ -150,11 +150,11 @@ export async function GET(request: Request) {
       .slice(-limite)
       .map((p) => ({ fecha: p.fecha, precioMedio: p.precio }));
 
-    const producto = await db
+    const producto = (await db
       .select()
       .from(schema.productos)
       .where(eq(schema.productos.id, productoIdNum))
-      .get();
+      .execute())[0];
 
     return NextResponse.json({
       producto: producto

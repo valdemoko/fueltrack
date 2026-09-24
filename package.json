@@ -12,7 +12,11 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "db:generate": "drizzle-kit generate",
-    "db:push": "drizzle-kit push",
+    "db:migrate": "npx tsx scripts/aplicar-migraciones.ts",
+    "db:smoke": "npx tsx scripts/smoke-neon.ts",
+    "db:migrar:sqlite": "npx tsx scripts/migrar-sqlite-a-neon.ts",
+    "db:ingerir": "npx tsx scripts/ingestar-hoy.ts",
+    "db:reconstruir": "npx tsx scripts/reconstruir-historicos.ts",
     "db:seed": "npx tsx src/lib/db/seed.ts",
     "db:seed:miteco": "npx tsx src/lib/db/seed-miteco.ts",
     "db:seed:spain": "npx tsx src/lib/db/seed-spain.ts"

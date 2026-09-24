@@ -1,5 +1,6 @@
 /**
- * Validación contra datos reales del snapshot local de `data/combustible.db`.
+ * Validación de la selección de fichas de estación DEL SITEMAP contra datos
+ * reales del snapshot local de `data/combustible.db`.
  *
  * Comprueba las invariantes que rompía el filtro de frescura de texto:
  *  1. Las fechas legacy obsoletas que el texto daba por recientes ya NO entran.
@@ -7,16 +8,21 @@
  *  3. Las fechas legacy que sí son recientes de verdad (p. ej. "27/08/2026")
  *     no se descartan por su formato.
  *
- * Se omite automáticamente si no hay BD local (CI, Vercel).
+ * El snapshot SOLO se usa como fuente de filas de prueba: la lógica que se
+ * valida es `seleccionarEstacionesFrescas()`, que es pura. Así el test no
+ * necesita una base de datos viva (ni local ni de Neon) y puede correr en CI.
+ * Se omite automáticamente si no hay snapshot.
  */
-import { describe, it, expect, beforeAll, vi } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
 import { parseFechaActualizacion, diasDeAntiguedad, esFechaFresca } from "../fecha";
+import { seleccionarEstacionesFrescas } from "../sitemap-estaciones";
 
 const MAX_DIAS = 30;
 const MAX_ESTACIONES = 800;
+const BASE_URL = "https://fueltrack.site";
 const RUTA_BD = path.resolve(process.cwd(), "data/combustible.db");
 const haySnapshot = fs.existsSync(RUTA_BD);
 
@@ -31,8 +37,7 @@ suite("sitemap · frescura de /estacion/ contra el snapshot local", () => {
   let candidatas: FilaCandidata[] = [];
   let corteTexto = "";
 
-  beforeAll(async () => {
-    vi.stubEnv("DB_LOCAL", "1");
+  beforeAll(() => {
     bd = new Database(RUTA_BD, { readonly: true });
 
     corteTexto = (
@@ -47,15 +52,15 @@ suite("sitemap · frescura de /estacion/ contra el snapshot local", () => {
       )
       .all() as FilaCandidata[];
 
-    const moduloSitemap = await import("@/app/sitemap");
-    const entradas = (await moduloSitemap.default()) as Array<{
-      url: string;
-      lastModified?: Date;
-    }>;
-    const deEstacion = entradas.filter((e) => e.url.includes("/estacion/"));
-    urls = deEstacion.map((e) => e.url);
-    fechas = deEstacion.map((e) => e.lastModified as Date);
-  }, 180_000);
+    // Misma función que usa el sitemap, con los mismos topes.
+    const seleccionadas = seleccionarEstacionesFrescas(
+      candidatas,
+      MAX_DIAS,
+      MAX_ESTACIONES,
+    );
+    urls = seleccionadas.map((e) => `${BASE_URL}/estacion/${e.id}`);
+    fechas = seleccionadas.map((e) => e.fecha);
+  }, 60_000);
 
   it("todas las URLs emitidas son /estacion/{id} numérico", () => {
     expect(urls.length).toBeGreaterThan(0);
@@ -83,7 +88,7 @@ suite("sitemap · frescura de /estacion/ contra el snapshot local", () => {
       .filter((c): c is { id: string; fecha: Date } => esFechaFresca(c.fecha, MAX_DIAS))
       .sort((a, b) => b.fecha.getTime() - a.fecha.getTime() || (a.id < b.id ? -1 : 1))
       .slice(0, MAX_ESTACIONES)
-      .map((c) => `https://fueltrack.site/estacion/${c.id}`);
+      .map((c) => `${BASE_URL}/estacion/${c.id}`);
     expect(urls).toEqual(esperadas);
   });
 
@@ -116,7 +121,7 @@ suite("sitemap · frescura de /estacion/ contra el snapshot local", () => {
     // Y ninguna de ellas aparece en el sitemap emitido.
     const emitidas = new Set(urls);
     for (const obsoleta of obsoletasQuePasaban) {
-      expect(emitidas.has(`https://fueltrack.site/estacion/${obsoleta.id}`)).toBe(false);
+      expect(emitidas.has(`${BASE_URL}/estacion/${obsoleta.id}`)).toBe(false);
     }
   });
 

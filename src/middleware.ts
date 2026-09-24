@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@libsql/client";
+import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { slugify } from "@/lib/slug";
 
 /**
@@ -15,8 +15,18 @@ import { slugify } from "@/lib/slug";
  *    notFound() en metadata no puede cambiar el status una vez que el
  *    shell del streaming ya se ha enviado.
  *
- * Runtime Node (libSQL no funciona en Edge). El cliente libSQL funciona
- * igual contra file: (local) y libsql:// (Turso) según DATABASE_URL.
+ * Runtime Node. El driver HTTP de Neon no funciona en Edge, así que este
+ * middleware se declara explícitamente como nodejs.
+ *
+ * ── COSTE DE CÓMPUTO (por qué NO se consulta la BD por request) ──────────
+ *
+ * El plan Free de Neon da 100 CU-horas al mes de cómputo y **cobra por tiempo
+ * despierto**, no por consulta: una sola consulta cada pocos segundos impide
+ * que el compute se duerma y lo mantiene facturando las 720 h del mes (≈182 h
+ * de cómputo, el doble del plan). Por eso TODO lo que el middleware necesita
+ * (los IDs de estación y los slugs geográficos) se lee UNA vez por proceso y
+ * se guarda en memoria con TTL de 6 h: una vez caliente, un request no toca
+ * la base de datos y el compute puede dormirse entre visitas.
  */
 
 // Estrategia canónica:
@@ -34,25 +44,25 @@ const REDIRECTS: Record<string, string> = {
   "/gasolineras-malaga": "/gasolineras/andalucia/malaga",
 };
 
-/** Cliente libSQL reutilizado entre invocaciones (single process). */
-let client: ReturnType<typeof createClient> | null = null;
+/** Cliente Neon reutilizado entre invocaciones (un proceso por instancia). */
+let sqlFn: NeonQueryFunction<false, false> | null = null;
 
-function getCliente() {
-  if (!client) {
-    // TURSO_DATABASE_URL (preferente) o DATABASE_URL como alias.
-    const remota =
-      process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "";
-    const url = remota.startsWith("libsql://")
-      ? remota
-      : "file:./data/combustible.db";
-    client = createClient({
-      url,
-      authToken:
-        process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN || undefined,
-    });
+function getSql() {
+  if (!sqlFn) {
+    const url = process.env.DATABASE_URL || "";
+    sqlFn = neon(url || "postgresql://sin-configurar@localhost/sin-configurar");
   }
-  return client;
+  return sqlFn;
 }
+
+/**
+ * TTL de las cachés en memoria: 6 h.
+ *
+ * Suficiente para que una estación nueva o una ruta recién creada sean
+ * visibles el mismo día, y bajo suficiente para que el compute de Neon pueda
+ * dormirse (una recarga cada 6 h es ~120 lecturas al mes, no 1,5 M).
+ */
+const CACHE_TTL_MS = 6 * 3600 * 1000;
 
 // ─── Caché en memoria de slugs geográficos válidos ─────────────────────────
 // (auditoría I2: 404 real para slugs geo inválidos sin coste de BD por
@@ -70,9 +80,6 @@ interface SlugsGeo {
 let slugsGeo: SlugsGeo | null = null;
 let cargandoSlugs: Promise<SlugsGeo> | null = null;
 
-/** TTL de la caché de slugs: 6 h (la geografía es prácticamente inmutable). */
-const SLUGS_TTL_MS = 6 * 3600 * 1000;
-
 async function cargarSlugsGeo(): Promise<SlugsGeo> {
   const ccaa = new Set<string>();
   const provincia = new Set<string>();
@@ -81,28 +88,28 @@ async function cargarSlugsGeo(): Promise<SlugsGeo> {
   // 3 consultas ligeras sobre catálogos (19 + 52 + 3.539 filas en total).
   // NOTA: municipios completos son ~3.5k filas; se leen solo id+nombre vía
   // JOIN de provincias para reconstruir la ruta completa.
-  const ccaaRows = await getCliente().execute(
-    "SELECT nombre FROM ccaa"
-  );
-  for (const r of ccaaRows.rows) {
+  const sql = getSql();
+
+  const ccaaRows = await sql`SELECT nombre FROM ccaa`;
+  for (const r of ccaaRows) {
     ccaa.add(slugify(String(r.nombre)));
   }
 
-  const provRows = await getCliente().execute(
-    `SELECT p.nombre AS prov, c.nombre AS ccaa
-     FROM provincias p JOIN ccaa c ON c.id = p.ccaa_id`
-  );
-  for (const r of provRows.rows) {
+  const provRows = await sql`
+    SELECT p.nombre AS prov, c.nombre AS ccaa
+    FROM provincias p JOIN ccaa c ON c.id = p.ccaa_id
+  `;
+  for (const r of provRows) {
     provincia.add(`${slugify(String(r.ccaa))}/${slugify(String(r.prov))}`);
   }
 
-  const munRows = await getCliente().execute(
-    `SELECT m.nombre AS mun, p.nombre AS prov, c.nombre AS ccaa
-     FROM municipios m
-     JOIN provincias p ON p.id = m.provincia_id
-     JOIN ccaa c ON c.id = p.ccaa_id`
-  );
-  for (const r of munRows.rows) {
+  const munRows = await sql`
+    SELECT m.nombre AS mun, p.nombre AS prov, c.nombre AS ccaa
+    FROM municipios m
+    JOIN provincias p ON p.id = m.provincia_id
+    JOIN ccaa c ON c.id = p.ccaa_id
+  `;
+  for (const r of munRows) {
     municipio.add(
       `${slugify(String(r.ccaa))}/${slugify(String(r.prov))}/${slugify(String(r.mun))}`
     );
@@ -113,7 +120,7 @@ async function cargarSlugsGeo(): Promise<SlugsGeo> {
 
 async function getSlugsGeo(): Promise<SlugsGeo | null> {
   try {
-    if (slugsGeo && Date.now() - slugsGeo.cargadoEn < SLUGS_TTL_MS) {
+    if (slugsGeo && Date.now() - slugsGeo.cargadoEn < CACHE_TTL_MS) {
       return slugsGeo;
     }
     if (!cargandoSlugs) {
@@ -131,17 +138,44 @@ async function getSlugsGeo(): Promise<SlugsGeo | null> {
   }
 }
 
-async function estacionExiste(id: string): Promise<boolean> {
+// ─── Caché en memoria de IDs de estación ───────────────────────────────────
+// El gate de /estacion/[id] cubre 13.135 fichas. Consultar la BD por request
+// mantendría el compute de Neon despierto 24/7 (≈182 CU-horas contra las 100
+// del plan Free), así que se carga el conjunto completo de IDs una vez por
+// proceso y se responde desde memoria.
+
+let idsEstaciones: { set: Set<string>; cargadoEn: number } | null = null;
+let cargandoIds: Promise<Set<string>> | null = null;
+
+async function cargarIdsEstaciones(): Promise<Set<string>> {
+  const filas = await getSql()`SELECT id FROM estaciones`;
+  return new Set(filas.map((r) => String(r.id)));
+}
+
+async function getIdsEstaciones(): Promise<Set<string> | null> {
   try {
-    const result = await getCliente().execute({
-      sql: "SELECT 1 FROM estaciones WHERE id = ? LIMIT 1",
-      args: [id],
-    });
-    return result.rows.length > 0;
+    if (idsEstaciones && Date.now() - idsEstaciones.cargadoEn < CACHE_TTL_MS) {
+      return idsEstaciones.set;
+    }
+    if (!cargandoIds) {
+      cargandoIds = cargarIdsEstaciones().then((set) => {
+        idsEstaciones = { set, cargadoEn: Date.now() };
+        cargandoIds = null;
+        return set;
+      });
+    }
+    return await cargandoIds;
   } catch {
-    // Si la BD no está disponible, no bloquear: dejar que la página decida.
-    return true;
+    // BD no disponible: no bloquear el tráfico válido; dejar decidir a la
+    // página (que ya renderiza not-found con noindex como red de seguridad).
+    return null;
   }
+}
+
+async function estacionExiste(id: string): Promise<boolean> {
+  const ids = await getIdsEstaciones();
+  // Sin caché (BD caída o aún cargando): no bloquear.
+  return ids ? ids.has(id) : true;
 }
 
 /** Segmento de slug razonable: letras/números y guiones, 1-80 chars. */
@@ -205,7 +239,7 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Node runtime: @libsql/client no está disponible en Edge
+  // Node runtime: el driver HTTP de Neon no está disponible en Edge
   runtime: "nodejs",
   matcher: [
     "/estacion/:path*",

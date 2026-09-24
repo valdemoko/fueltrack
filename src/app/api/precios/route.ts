@@ -50,7 +50,7 @@ export async function GET(request: Request) {
       .from(schema.estaciones)
       .where(conditions.length > 0 ? and(...conditions) : undefined)
       .limit(limite)
-      .all();
+      .execute();
 
     // Para cada estación, obtener sus precios
     const resultado = await Promise.all(
@@ -68,7 +68,7 @@ export async function GET(request: Request) {
           eq(schema.precios.productoId, schema.productos.id)
         )
         .where(eq(schema.precios.estacionId, estacion.id))
-        .all();
+        .execute();
 
         return {
           ...estacion,

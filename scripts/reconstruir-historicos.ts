@@ -22,8 +22,9 @@
  *   npx tsx scripts/reconstruir-historicos.ts --ejecutar
  *   npx tsx scripts/reconstruir-historicos.ts --ejecutar --desde=2026-09-14 --hasta=2026-09-23
  *
- * Coste (cuota Turso): por día ~47k escrituras (observaciones) + ~9k
- * (agregados). 10 días ≈ 560k escrituras (5,6 % de la cuota mensual libre).
+ * Coste: por día ~47k filas de observaciones + ~9k de agregados. En Neon no
+ * hay cuota por fila, pero sí un límite de 10 s por sentencia: por eso la
+ * ingesta va por lotes (ver FILAS_POR_SENTENCIA en la ingesta).
  */
 import { readFileSync, existsSync } from "node:fs";
 import { sql } from "drizzle-orm";
@@ -39,25 +40,12 @@ function cargarEnvLocal() {
 }
 cargarEnvLocal();
 
-const HOSTS_PROHIBIDOS = [
-  "fueltrack-valdemokoo.aws-eu-west-1.turso.io",
-  "combustible-webssssss.aws-eu-west-1.turso.io",
-  "gasofa-proyectoss.aws-eu-west-1.turso.io",
-  "combustible-final.aws-eu-west-1.turso.io",
-];
-
-const URL_BD = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL;
-const TOKEN = process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN;
-if (!URL_BD || !TOKEN) {
-  console.error("Faltan TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (en .env.local o por entorno)");
+if (!process.env.DATABASE_URL) {
+  console.error("Falta DATABASE_URL (en .env.local o por entorno)");
   process.exit(1);
 }
-for (const host of HOSTS_PROHIBIDOS) {
-  if (URL_BD.includes(host)) {
-    console.error(`BLOQUEADO: la URL apunta a una BD anterior (${host})`);
-    process.exit(1);
-  }
-}
+/** URL con la contraseña oculta, para poder imprimirla. */
+const URL_ENMASCARADA = (process.env.DATABASE_URL ?? "").replace(/\/\/[^@/]*@/, "//***@");
 
 const EJECUTAR = process.argv.includes("--ejecutar");
 const opcion = (nombre: string): string | null => {
@@ -89,7 +77,7 @@ function ayerIso(): string {
 async function main() {
   // Import dinámico: `@/lib/db` lee las variables de entorno al importarse,
   // así que debe hacerse DESPUÉS de cargar .env.local.
-  const { db } = await import("@/lib/db");
+  const { db, queryAll, queryGet } = await import("@/lib/db");
   const { ingestHistorico } = await import("@/lib/miteco/ingestion");
   const { reconstruirGeoDia, reconstruirSemanasYNacional, RETENCION_DIAS_HISTORICO } =
     await import("@/lib/db/mantenimiento");
@@ -98,15 +86,10 @@ async function main() {
   const corte = DESDE_ARG ?? sumarDias(ayer, -(RETENCION_DIAS_HISTORICO - 1));
   const fin = HASTA_ARG ?? ayer;
 
-  const nHist = (await db.get(sql`SELECT COUNT(*) AS n FROM precios_historico`)) as
-    | { n: number }
-    | undefined;
-  const nGeo = (await db.get(sql`SELECT COUNT(*) AS n FROM hist_geo_dia`)) as
-    | { n: number }
-    | undefined;
+  const nHist = await queryGet<{ n: number }>(sql`SELECT COUNT(*) AS n FROM precios_historico`);
+  const nGeo = await queryGet<{ n: number }>(sql`SELECT COUNT(*) AS n FROM hist_geo_dia`);
 
-  const objetivo = process.env.DB_LOCAL === "1" ? "file:./data/combustible.db (DB_LOCAL=1)" : URL_BD;
-  console.log(`BD: ${objetivo}`);
+  console.log(`BD: ${URL_ENMASCARADA}`);
   console.log(`precios_historico: ${nHist?.n ?? 0} filas`);
   console.log(`hist_geo_dia:      ${nGeo?.n ?? 0} filas`);
   console.log(`Ventana que debe existir: ${corte} … ${fin}\n`);
@@ -118,9 +101,9 @@ async function main() {
   // Días realmente presentes (incluye huecos INTERIORES: una parada del cron
   // a mitad de mes no se detectaría mirando solo la fecha máxima).
   const leerFechas = async (tabla: string): Promise<Set<string>> => {
-    const filas = (await db.all(sql.raw(
+    const filas = await queryAll<{ fecha: string }>(sql.raw(
       `SELECT DISTINCT fecha FROM ${tabla} WHERE fecha BETWEEN '${corte}' AND '${fin}'`
-    ))) as unknown as Array<{ fecha: string }>;
+    ));
     return new Set(filas.map((f) => f.fecha));
   };
   const presentesHist = await leerFechas("precios_historico");
@@ -140,8 +123,8 @@ async function main() {
   }
 
   console.log(
-    `\nCoste estimado: ~${(faltanHist.length * 56000).toLocaleString("es-ES")} escrituras ` +
-      `(${(((faltanHist.length * 56000) / 1e7) * 100).toFixed(1)} % de la cuota mensual libre)`
+    `\nVolumen a escribir: ~${(faltanHist.length * 56000).toLocaleString("es-ES")} filas ` +
+      `en ${faltanHist.length} día(s) de observaciones + agregados.`
   );
   if (!EJECUTAR) {
     console.log("\nModo plan: no se escribe nada. Añade --ejecutar para rellenar.");
@@ -174,10 +157,10 @@ async function main() {
     console.log("→ Reconstruyendo hist_geo_semana e hist_nac_dia...");
     await reconstruirSemanasYNacional(d0, d1);
 
-    const comprobacion = (await db.get(sql`
+    const comprobacion = await queryGet<{ n: number }>(sql`
       SELECT COUNT(DISTINCT fecha) AS n FROM hist_geo_dia
       WHERE fecha BETWEEN ${d0} AND ${d1}
-    `)) as { n: number } | undefined;
+    `);
     console.log(
       `\n✔ hist_geo_dia: ${comprobacion?.n ?? 0} días con datos en el rango reconstruido`
     );

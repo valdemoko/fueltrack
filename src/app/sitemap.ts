@@ -21,10 +21,10 @@
  */
 import type { MetadataRoute } from "next";
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, queryAll, queryGet } from "@/lib/db";
 import { SITE_URL } from "@/lib/siteConfig";
 import { slugify } from "@/lib/geografia";
-import { parseFechaActualizacion, esFechaFresca } from "@/lib/fecha";
+import { seleccionarEstacionesFrescas } from "@/lib/sitemap-estaciones";
 
 
 export default function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -67,7 +67,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
       const row = (await db
         .select({ fecha: sql<string>`MAX(fecha_observacion)` })
         .from(sql`precios`)
-        .get()) as { fecha: string } | undefined;
+        .execute())[0] as { fecha: string } | undefined;
       if (!row?.fecha) return new Date();
       const d = new Date(`${row.fecha}T00:00:00Z`);
       return Number.isNaN(d.getTime()) ? new Date() : d;
@@ -94,12 +94,11 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
   let geo: MetadataRoute.Sitemap = [];
   let productoURLs: MetadataRoute.Sitemap = [];
   try {
-    const ccaaRows = ((await db
-      .all(
-        sql`SELECT c.id, c.nombre FROM ccaa c
-            JOIN estaciones e ON e.ccaa_id = c.id
-            GROUP BY c.id, c.nombre`
-      )) as Array<{ id: string; nombre: string }>);
+    const ccaaRows = await queryAll<{ id: string; nombre: string }>(sql`
+      SELECT c.id, c.nombre FROM ccaa c
+      JOIN estaciones e ON e.ccaa_id = c.id
+      GROUP BY c.id, c.nombre
+    `);
 
     const ccaaUrls: MetadataRoute.Sitemap = [];
     const provinciaUrls: MetadataRoute.Sitemap = [];
@@ -114,13 +113,12 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
         priority: 0.8,
       });
 
-      const provincias = ((await db
-        .all(
-          sql`SELECT p.id, p.nombre FROM provincias p
-              JOIN estaciones e ON e.provincia_id = p.id
-              WHERE p.ccaa_id = ${ccaa.id}
-              GROUP BY p.id, p.nombre`
-        )) as Array<{ id: string; nombre: string }>);
+      const provincias = await queryAll<{ id: string; nombre: string }>(sql`
+        SELECT p.id, p.nombre FROM provincias p
+        JOIN estaciones e ON e.provincia_id = p.id
+        WHERE p.ccaa_id = ${ccaa.id}
+        GROUP BY p.id, p.nombre
+      `);
 
       for (const provincia of provincias) {
         const provinciaSlug = slugify(provincia.nombre);
@@ -132,15 +130,14 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
         });
 
         // Municipios con suficientes estaciones (calidad > cantidad)
-        const municipios = (await db
-          .all(sql`
-            SELECT m.id, m.nombre, COUNT(e.id) AS n
-            FROM municipios m
-            JOIN estaciones e ON e.municipio_id = m.id
-            WHERE m.provincia_id = ${provincia.id}
-            GROUP BY m.id, m.nombre
-            HAVING n >= ${MIN_ESTACIONES_MUNICIPIO}
-          `)) as Array<{ id: string; nombre: string; n: number }>;
+        const municipios = await queryAll<{ id: string; nombre: string; n: number }>(sql`
+          SELECT m.id, m.nombre, COUNT(e.id)::int AS n
+          FROM municipios m
+          JOIN estaciones e ON e.municipio_id = m.id
+          WHERE m.provincia_id = ${provincia.id}
+          GROUP BY m.id, m.nombre
+          HAVING COUNT(e.id) >= ${MIN_ESTACIONES_MUNICIPIO}
+        `);
 
         for (const municipio of municipios) {
           municipioUrls.push({
@@ -161,13 +158,13 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
 
     // Fechas máximas por producto con datos (1 seek por producto)
     // MAX(fecha) por producto = seek índice; filtra productos sin datos gratis
-    const productosConDatos = (await db.all(sql`
+    const productosConDatos = (await queryAll(sql`
       SELECT DISTINCT producto_id AS id FROM precios
     `)) as unknown as Array<{ id: number }>;
 
     const coberturas: Array<{ productoId: number; fecha: string }> = [];
     for (const producto of productosConDatos) {
-      const f = (await db.get(
+      const f = (await queryGet(
         sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${producto.id}`
       )) as unknown as { fecha: string } | undefined;
       if (f?.fecha) coberturas.push({ productoId: producto.id, fecha: f.fecha });
@@ -176,7 +173,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     // Combustible + provincia
     const coberturaProvincia: Array<{ provincia_id: string; producto_id: number }> = [];
     for (const { productoId, fecha } of coberturas) {
-      const filas = (await db.all(sql`
+      const filas = (await queryAll(sql`
         SELECT e.provincia_id
         FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
         WHERE pr.producto_id = ${productoId}
@@ -190,7 +187,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
       }
     }
 
-    const nombresProvincias = (await db.all(sql`
+    const nombresProvincias = (await queryAll(sql`
       SELECT p.id, p.nombre, c.nombre AS ccaa_nombre
       FROM provincias p JOIN ccaa c ON c.id = p.ccaa_id
     `)) as unknown as Array<{ id: string; nombre: string; ccaa_nombre: string }>;
@@ -217,7 +214,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     // solo descomentar cuando las páginas base estén indexadas.
     // const coberturaMunicipio: Array<{ municipio_id: string; producto_id: number }> = [];
     // for (const { productoId, fecha } of coberturas) {
-    //   const filas = (await db.all(sql`
+    //   const filas = (await queryAll(sql`
     //     SELECT e.municipio_id
     //     FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
     //     WHERE pr.producto_id = ${productoId}
@@ -232,7 +229,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     // }
     void MIN_COBERTURA_PRODUCTO_MUNICIPIO; // (referencia viva para re-activar)
 
-    // const municipiosIndexables = (await db.all(sql`
+    // const municipiosIndexables = (await queryAll(sql`
     //   SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
     //          COUNT(e2.id) AS n_estaciones
     //   FROM municipios m
@@ -282,7 +279,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
   try {
     // Barato: sin subqueries sobre precios (la página de estación hace su
     // propio gate 404 en middleware). Criterio: municipio indexable.
-    const candidatas = (await db.all(sql`
+    const candidatas = (await queryAll(sql`
       SELECT e.id, e.fecha_actualizacion
       FROM estaciones e
       WHERE (
@@ -291,31 +288,18 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
       ) >= ${MIN_ESTACIONES_MUNICIPIO}
     `)) as Array<{ id: string; fecha_actualizacion: string }>;
 
-    // El filtro de frescura NO se hace en SQL: `fecha_actualizacion` mezcla
-    // ISO y legacy dd/mm/aaaa, y una comparación de texto daba por recientes
-    // fichas de 2025 (ver src/lib/fecha.ts). Se filtra y ordena en memoria
-    // con timestamps reales, y el tope se aplica DESPUÉS de filtrar: con el
-    // LIMIT en SQL, los primeros registros eran casi todos obsoletos y el
-    // sitemap podía quedarse sin ninguna ficha de estación.
-    estaciones = candidatas
-      .map((e) => ({
-        id: e.id,
-        fecha: parseFechaActualizacion(e.fecha_actualizacion),
-      }))
-      .filter(
-        (e): e is { id: string; fecha: Date } =>
-          esFechaFresca(e.fecha, MAX_DIAS_SIN_ACTUALIZAR_ESTACION),
-      )
-      .sort(
-        (a, b) => b.fecha.getTime() - a.fecha.getTime() || (a.id < b.id ? -1 : 1),
-      )
-      .slice(0, MAX_ESTACIONES_SITEMAP)
-      .map((e) => ({
-        url: `${SITE_URL}/estacion/${e.id}`,
-        lastModified: e.fecha,
-        changeFrequency: "weekly" as const,
-        priority: 0.4,
-      }));
+    // Filtro, orden y tope: en memoria y con timestamps reales (ver
+    // src/lib/sitemap-estaciones.ts para el porqué de cada regla).
+    estaciones = seleccionarEstacionesFrescas(
+      candidatas,
+      MAX_DIAS_SIN_ACTUALIZAR_ESTACION,
+      MAX_ESTACIONES_SITEMAP,
+    ).map((e) => ({
+      url: `${SITE_URL}/estacion/${e.id}`,
+      lastModified: e.fecha,
+      changeFrequency: "weekly" as const,
+      priority: 0.4,
+    }));
   } catch (error) {
     // El sitemap se genera igualmente, sin las fichas de estación.
     console.error(

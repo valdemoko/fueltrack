@@ -22,13 +22,13 @@
  * política (30-36 días), así que las gráficas de "1 mes" siempre tienen sus
  * 30 días completos.
  *
- * Coste de cuota con una única pasada diaria (2,5M filas en total):
- *   - agregados:  ~5 pasadas sobre `precios` (46,8k) + 1 sobre la semana de
- *     hist_geo_dia (~82k) ≈ 330k lecturas y ~18k escrituras.
- *   - purga (lunes): ~1,1M lecturas (precios_historico 30d) + borrados.
+ * Con Postgres ya no hay cupo de filas que cuidar: el mantenimiento se
+ * organiza por lo que tarda, no por lo que "cuesta". Sigue corriendo una vez
+ * al día dentro del cron porque la purga semanal y el cierre mensual son
+ * operaciones de segundos, no porque haya que ahorrar escrituras.
  */
 import { sql } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { queryGet, queryRun } from "@/lib/db";
 
 /** Días de histórico detallado por estación que se conservan. */
 export const RETENCION_DIAS_HISTORICO = 30;
@@ -54,7 +54,8 @@ function fechaMenosDias(dias: number): string {
 
 /**
  * Lunes de la semana ISO a la que pertenece `fecha` (yyyy-MM-dd).
- * SQLite calcula lo mismo con date(fecha,'weekday 0','-6 days').
+ * En Postgres es date_trunc('week', fecha::date)::date, que también
+ * devuelve el lunes: date_trunc('week', …) usa semanas ISO.
  */
 export function lunesDeSemana(fecha: string): string {
   const d = new Date(`${fecha}T00:00:00Z`);
@@ -85,26 +86,26 @@ export async function mantenimientoDiario(
 
   // Autocuración: la tabla semanal se crea sola si la BD es heredada (así el
   // cron nunca falla por una tabla que falta tras una migración a mano).
-  await db.run(sql`
+  await queryRun(sql`
     CREATE TABLE IF NOT EXISTS hist_geo_semana (
       ambito TEXT NOT NULL,
       geo_id TEXT NOT NULL,
       producto_id INTEGER NOT NULL,
       semana TEXT NOT NULL,
-      precio_medio REAL NOT NULL,
+      precio_medio DOUBLE PRECISION NOT NULL,
       n_estaciones INTEGER NOT NULL,
       PRIMARY KEY (ambito, geo_id, producto_id, semana)
     )
   `);
-  await db.run(sql`
+  await queryRun(sql`
     CREATE INDEX IF NOT EXISTS idx_hist_geo_semana ON hist_geo_semana(semana)
   `);
-  await db.run(sql`
+  await queryRun(sql`
     CREATE TABLE IF NOT EXISTS resumen_nacional (
       producto_id INTEGER PRIMARY KEY,
-      precio_medio REAL NOT NULL,
-      precio_min REAL NOT NULL,
-      precio_max REAL NOT NULL,
+      precio_medio DOUBLE PRECISION NOT NULL,
+      precio_min DOUBLE PRECISION NOT NULL,
+      precio_max DOUBLE PRECISION NOT NULL,
       total_estaciones INTEGER NOT NULL,
       fecha TEXT NOT NULL
     )
@@ -117,9 +118,9 @@ export async function mantenimientoDiario(
   // protege la cuota — las páginas de estación y resúmenes nacionales
   // leen esta tabla (≤30 filas) en vez de escanear `precios` (~46k).
   // Coste: 1 pasada por precios/día (~46k lecturas + ~30 escrituras).
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO resumen_nacional (producto_id, precio_medio, precio_min, precio_max, total_estaciones, fecha)
-    SELECT producto_id, ROUND(AVG(precio), 4), MIN(precio), MAX(precio), COUNT(DISTINCT estacion_id), MAX(fecha_observacion)
+    SELECT producto_id, ROUND(AVG(precio)::numeric, 4), MIN(precio), MAX(precio), COUNT(DISTINCT estacion_id), MAX(fecha_observacion)
     FROM precios WHERE precio IS NOT NULL
     GROUP BY producto_id
     ON CONFLICT (producto_id) DO UPDATE SET
@@ -131,9 +132,9 @@ export async function mantenimientoDiario(
   `);
 
   // Nacional diario + permanente (hist_nac_dia nunca se poda: ~6,6k filas/año)
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_nac_dia (producto_id, fecha, precio_medio, n_estaciones)
-    SELECT producto_id, ${fecha}, ROUND(AVG(precio), 4), COUNT(*)
+    SELECT producto_id, ${fecha}, ROUND(AVG(precio)::numeric, 4), COUNT(*)
     FROM precios WHERE precio IS NOT NULL
     GROUP BY producto_id
     ON CONFLICT (producto_id, fecha) DO UPDATE SET
@@ -142,10 +143,10 @@ export async function mantenimientoDiario(
   `);
 
   // Ámbitos geográficos del día (hist_geo_dia): mun/prov/ccaa/nac
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
     SELECT 'mun', e.municipio_id, p.producto_id, ${fecha},
-           ROUND(AVG(p.precio), 4), COUNT(*)
+           ROUND(AVG(p.precio)::numeric, 4), COUNT(*)
     FROM precios p JOIN estaciones e ON e.id = p.estacion_id
     WHERE p.precio IS NOT NULL
       AND p.producto_id IN (${LISTA_PRODUCTOS_GEO})
@@ -154,10 +155,10 @@ export async function mantenimientoDiario(
       precio_medio = excluded.precio_medio,
       n_estaciones = excluded.n_estaciones
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
     SELECT 'prov', e.provincia_id, p.producto_id, ${fecha},
-           ROUND(AVG(p.precio), 4), COUNT(*)
+           ROUND(AVG(p.precio)::numeric, 4), COUNT(*)
     FROM precios p JOIN estaciones e ON e.id = p.estacion_id
     WHERE p.precio IS NOT NULL
       AND p.producto_id IN (${LISTA_PRODUCTOS_GEO})
@@ -166,10 +167,10 @@ export async function mantenimientoDiario(
       precio_medio = excluded.precio_medio,
       n_estaciones = excluded.n_estaciones
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
     SELECT 'ccaa', e.ccaa_id, p.producto_id, ${fecha},
-           ROUND(AVG(p.precio), 4), COUNT(*)
+           ROUND(AVG(p.precio)::numeric, 4), COUNT(*)
     FROM precios p JOIN estaciones e ON e.id = p.estacion_id
     WHERE p.precio IS NOT NULL
       AND p.producto_id IN (${LISTA_PRODUCTOS_GEO})
@@ -178,9 +179,9 @@ export async function mantenimientoDiario(
       precio_medio = excluded.precio_medio,
       n_estaciones = excluded.n_estaciones
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
-    SELECT 'nac', 'ES', producto_id, ${fecha}, ROUND(AVG(precio), 4), COUNT(*)
+    SELECT 'nac', 'ES', producto_id, ${fecha}, ROUND(AVG(precio)::numeric, 4), COUNT(*)
     FROM precios WHERE precio IS NOT NULL
       AND producto_id IN (${LISTA_PRODUCTOS_GEO})
     GROUP BY producto_id
@@ -197,11 +198,14 @@ export async function mantenimientoDiario(
   const lunes = lunesDeSemana(fecha);
   await agregarSemanas(lunes, fecha);
 
-  const diaRow = (await db.get(sql`
-    SELECT
+  // `::int`: Postgres devuelve bigint (y por tanto una cadena en JS) y aquí
+  // el número se muestra al operador; sumar cadenas daría "12" + "21" = "1221".
+  const diaRow = await queryGet<{ n: number }>(sql`
+    SELECT (
       (SELECT COUNT(*) FROM hist_geo_dia WHERE fecha = ${fecha}) +
-      (SELECT COUNT(*) FROM hist_nac_dia WHERE fecha = ${fecha}) AS n
-  `)) as { n: number } | undefined;
+      (SELECT COUNT(*) FROM hist_nac_dia WHERE fecha = ${fecha})
+    )::int AS n
+  `);
   agregados = Number(diaRow?.n ?? 0);
 
   if (soloAgregados) {
@@ -209,10 +213,13 @@ export async function mantenimientoDiario(
   }
 
   // ── 3. Retención (solo 1 vez por semana) ───────────────────────────────
-  // Los DELETE por fecha usan el índice de fecha, pero cada pasada recorre
-  // la ventana que queda por delante del corte (~1,1M filas). Ejecutándolo
-  // solo los lunes el coste baja de ~33M lecturas/mes a ~5M, sin efecto
-  // visible: la ventana se desplaza como mucho 6 días.
+  // El DELETE por fecha NO tiene índice que lo sostenga: la PK de estas
+  // tablas empieza por el ámbito geográfico, no por la fecha (a propósito:
+  // un índice por fecha costaba una entrada por fila en cada escritura y fue
+  // una de las causas que reventó la cuota del motor anterior). Cada pasada
+  // recorre por tanto la tabla entera (~1,1 M filas) y filtra. Por eso se
+  // ejecuta solo los lunes: sin efecto visible (la ventana se desplaza como
+  // mucho 6 días) y el coste baja a la séptima parte.
   const esLunes = new Date().getUTCDay() === 1;
   if (!esLunes) {
     return { agregados, borrados: 0, mesCerrado: null };
@@ -221,7 +228,7 @@ export async function mantenimientoDiario(
 
   // ── 4. Cierre mensual idempotente ──────────────────────────────────────
   const mes = mesAnterior();
-  const yaProcesado = await db.get(sql`
+  const yaProcesado = await queryGet(sql`
     SELECT mes FROM hist_meses_procesados WHERE mes = ${mes}
   `);
   if (!yaProcesado) {
@@ -245,16 +252,16 @@ export async function aplicarRetencion(): Promise<number> {
   const corteGeo = fechaMenosDias(RETENCION_DIAS_GEO);
   const corteSemana = fechaMenosDias(RETENCION_DIAS_SEMANA);
 
-  const r1 = await db.run(sql`
+  const r1 = await queryRun(sql`
     DELETE FROM precios_historico WHERE fecha < ${corteHist}
   `);
-  const r2 = await db.run(sql`
+  const r2 = await queryRun(sql`
     DELETE FROM hist_geo_dia WHERE fecha < ${corteGeo}
   `);
-  const r3 = await db.run(sql`
+  const r3 = await queryRun(sql`
     DELETE FROM hist_geo_semana WHERE semana < ${corteSemana}
   `);
-  return r1.rowsAffected + r2.rowsAffected + r3.rowsAffected;
+  return r1 + r2 + r3;
 }
 
 /**
@@ -266,11 +273,11 @@ export async function aplicarRetencion(): Promise<number> {
  * Media = media de las medias diarias, igual que el cierre mensual.
  */
 async function agregarSemanas(desde: string, hasta: string): Promise<void> {
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_semana (ambito, geo_id, producto_id, semana, precio_medio, n_estaciones)
     SELECT ambito, geo_id, producto_id,
-           date(fecha, 'weekday 0', '-6 days') AS semana,
-           ROUND(AVG(precio_medio), 4), MAX(n_estaciones)
+           date_trunc('week', fecha::date)::date AS semana,
+           ROUND(AVG(precio_medio)::numeric, 4), MAX(n_estaciones)
     FROM hist_geo_dia
     WHERE ambito IN ('mun', 'prov', 'ccaa')
       AND fecha BETWEEN ${desde} AND ${hasta}
@@ -305,30 +312,30 @@ export async function reconstruirGeoDia(
       n_estaciones = excluded.n_estaciones
   `;
 
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
-    SELECT 'mun', e.municipio_id, h.producto_id, h.fecha, ROUND(AVG(h.precio), 4), COUNT(*)
+    SELECT 'mun', e.municipio_id, h.producto_id, h.fecha, ROUND(AVG(h.precio)::numeric, 4), COUNT(*)
     ${filtro}
     GROUP BY e.municipio_id, h.producto_id, h.fecha
     ${conflicto}
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
-    SELECT 'prov', e.provincia_id, h.producto_id, h.fecha, ROUND(AVG(h.precio), 4), COUNT(*)
+    SELECT 'prov', e.provincia_id, h.producto_id, h.fecha, ROUND(AVG(h.precio)::numeric, 4), COUNT(*)
     ${filtro}
     GROUP BY e.provincia_id, h.producto_id, h.fecha
     ${conflicto}
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
-    SELECT 'ccaa', e.ccaa_id, h.producto_id, h.fecha, ROUND(AVG(h.precio), 4), COUNT(*)
+    SELECT 'ccaa', e.ccaa_id, h.producto_id, h.fecha, ROUND(AVG(h.precio)::numeric, 4), COUNT(*)
     ${filtro}
     GROUP BY e.ccaa_id, h.producto_id, h.fecha
     ${conflicto}
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_geo_dia (ambito, geo_id, producto_id, fecha, precio_medio, n_estaciones)
-    SELECT 'nac', 'ES', h.producto_id, h.fecha, ROUND(AVG(h.precio), 4), COUNT(*)
+    SELECT 'nac', 'ES', h.producto_id, h.fecha, ROUND(AVG(h.precio)::numeric, 4), COUNT(*)
     FROM precios_historico h
     WHERE h.fecha BETWEEN ${desde} AND ${hasta}
       AND h.precio IS NOT NULL
@@ -348,7 +355,7 @@ export async function reconstruirSemanasYNacional(
   hasta: string
 ): Promise<void> {
   await agregarSemanas(desde, hasta);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_nac_dia (producto_id, fecha, precio_medio, n_estaciones)
     SELECT producto_id, fecha, precio_medio, n_estaciones
     FROM hist_geo_dia
@@ -380,9 +387,9 @@ export async function cerrarMes(mes: string): Promise<void> {
   const desde = `${mes}-01`;
   const hasta = `${mes}-31`;
 
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_mun_mes (municipio_id, producto_id, mes, precio_medio, n_estaciones)
-    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio), 4), MAX(n_estaciones)
+    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio)::numeric, 4), MAX(n_estaciones)
     FROM hist_geo_dia
     WHERE ambito = 'mun' AND fecha BETWEEN ${desde} AND ${hasta}
     GROUP BY geo_id, producto_id
@@ -390,9 +397,9 @@ export async function cerrarMes(mes: string): Promise<void> {
       precio_medio = excluded.precio_medio,
       n_estaciones = excluded.n_estaciones
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_prov_mes (provincia_id, producto_id, mes, precio_medio, n_estaciones)
-    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio), 4), MAX(n_estaciones)
+    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio)::numeric, 4), MAX(n_estaciones)
     FROM hist_geo_dia
     WHERE ambito = 'prov' AND fecha BETWEEN ${desde} AND ${hasta}
     GROUP BY geo_id, producto_id
@@ -400,9 +407,9 @@ export async function cerrarMes(mes: string): Promise<void> {
       precio_medio = excluded.precio_medio,
       n_estaciones = excluded.n_estaciones
   `);
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_ccaa_mes (ccaa_id, producto_id, mes, precio_medio, n_estaciones)
-    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio), 4), MAX(n_estaciones)
+    SELECT geo_id, producto_id, ${mes}, ROUND(AVG(precio_medio)::numeric, 4), MAX(n_estaciones)
     FROM hist_geo_dia
     WHERE ambito = 'ccaa' AND fecha BETWEEN ${desde} AND ${hasta}
     GROUP BY geo_id, producto_id
@@ -411,9 +418,9 @@ export async function cerrarMes(mes: string): Promise<void> {
       n_estaciones = excluded.n_estaciones
   `);
 
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_estacion_mes (estacion_id, producto_id, mes, precio_medio, n_observaciones)
-    SELECT estacion_id, producto_id, ${mes}, ROUND(AVG(precio), 4), COUNT(*)
+    SELECT estacion_id, producto_id, ${mes}, ROUND(AVG(precio)::numeric, 4), COUNT(*)
     FROM precios_historico
     WHERE fecha BETWEEN ${desde} AND ${hasta} AND precio IS NOT NULL
     GROUP BY estacion_id, producto_id
@@ -422,7 +429,7 @@ export async function cerrarMes(mes: string): Promise<void> {
       n_observaciones = excluded.n_observaciones
   `);
 
-  await db.run(sql`
+  await queryRun(sql`
     INSERT INTO hist_meses_procesados (mes, procesado_en)
     VALUES (${mes}, ${new Date().toISOString()})
     ON CONFLICT (mes) DO NOTHING

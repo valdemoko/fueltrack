@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { queryAll } from "@/lib/db";
 import { sql } from "drizzle-orm";
 import { slugify } from "@/lib/slug";
 
@@ -41,7 +41,7 @@ export async function getCcaaBySlug(
   slug: string
 ): Promise<{ id: string; nombre: string } | null> {
   const candidata = slug.replace(/-/g, " ");
-  const todas = (await db.all(sql`SELECT id, nombre FROM ccaa`)) as Array<{
+  const todas = (await queryAll(sql`SELECT id, nombre FROM ccaa`)) as Array<{
     id: string;
     nombre: string;
   }>;
@@ -59,7 +59,7 @@ export async function getProvinciaBySlug(
   slug: string,
   ccaaId: string
 ): Promise<{ id: string; nombre: string } | null> {
-  const provincias = (await db.all(sql`
+  const provincias = (await queryAll(sql`
     SELECT id, nombre FROM provincias WHERE ccaa_id = ${ccaaId}
   `)) as Array<{ id: string; nombre: string }>;;
   const candidata = slug.replace(/-/g, " ");
@@ -77,7 +77,7 @@ export async function getMunicipioBySlug(
   slug: string,
   provinciaId: string
 ): Promise<{ id: string; nombre: string } | null> {
-  const municipios = (await db.all(sql`
+  const municipios = (await queryAll(sql`
     SELECT id, nombre FROM municipios WHERE provincia_id = ${provinciaId}
   `)) as Array<{ id: string; nombre: string }>;;
   const candidata = slug.replace(/-/g, " ");

@@ -1,93 +1,112 @@
 /**
- * Conexión a la base de datos.
+ * Conexión a la base de datos — PostgreSQL (Neon).
  *
- * UN SOLO DRIVER asíncrono (@libsql/client + drizzle-orm/libsql) para
- * desarrollo y producción:
- *  - Producción: DATABASE_URL = libsql://... (Turso) + DATABASE_AUTH_TOKEN.
- *  - Desarrollo (sin env vars): file:./data/combustible.db (SQLite local,
- *    mismo formato que el better-sqlite3 anterior — cero migración).
+ * UN SOLO DRIVER: `@neondatabase/serverless` en modo HTTP + `drizzle-orm/neon-http`.
  *
- * Todo el acceso a datos de la app usa las envolturas async de este archivo
- * (queryAll / queryGet / queryRun) o `db` con `await`.
+ * ── Por qué NO hay soporte de fichero SQLite aquí ─────────────────────────
+ *
+ * El motor anterior (libSQL/Turso) facturaba **por fila** leída y escrita, y
+ * contar las entradas de índice hacía que una sola fila costase entre 4 y 7
+ * escrituras facturables. Un único trasvase de 2,86 M de filas se llevó 12,55 M
+ * del cupo mensual. Postgres no cobra filas, así que ese problema desaparece
+ * por construcción: aquí no se optimiza para el contador, sino para el usuario.
+ *
+ * ── IMPORTANTE: `db` solo tiene `execute()` ───────────────────────────────
+ *
+ * `NeonHttpDatabase` extiende `PgDatabase`, y en drizzle 0.45 `PgDatabase` NO
+ * expone `all()`, `get()` ni `run()` (eso es del dialecto SQLite). Por eso todo
+ * el acceso a datos pasa por los envoltorios de este fichero:
+ *
+ *   queryAll / queryGet / queryRun
+ *
+ * No llames a `db.all(...)`: no existe y el compilador no te lo va a decir
+ * hasta que cambies este fichero. Y sobre los constructores de consultas
+ * (`.insert(...)`, `.select(...)`) usa `.execute()`, nunca `.run()`.
  */
-import { drizzle } from "drizzle-orm/libsql";
-import { createClient, type Client } from "@libsql/client";
+import { drizzle } from "drizzle-orm/neon-http";
+import { neon } from "@neondatabase/serverless";
 import { sql, type SQL } from "drizzle-orm";
 import * as schema from "./schema";
 
-/** URL de Turso: acepta TURSO_DATABASE_URL y el alias clásico DATABASE_URL. */
-const DATABASE_URL = process.env.TURSO_DATABASE_URL || process.env.DATABASE_URL || "";
-/** Token de Turso: acepta TURSO_AUTH_TOKEN y el alias clásico DATABASE_AUTH_TOKEN. */
-const DATABASE_AUTH_TOKEN =
-  process.env.TURSO_AUTH_TOKEN || process.env.DATABASE_AUTH_TOKEN || "";
-/** Modo forzado local para scripts CLI: DB_LOCAL=1 */
-const FORCE_LOCAL = process.env.DB_LOCAL === "1";
-
-const isRemote = DATABASE_URL.startsWith("libsql://") || DATABASE_URL.startsWith("https://");
 /**
- * Fichero SQLite local (desarrollo y pruebas). Se puede apuntar a otro
- * fichero con LOCAL_DB=./data/otro.db — útil para validar mantenimiento
- * sobre una COPIA sin tocar la base de datos de trabajo (y sin gastar cuota).
+ * URL de la base de datos. Solo `DATABASE_URL` (Neon).
+ *
+ * NO hay respaldo a `TURSO_DATABASE_URL`: aquella cadena es `libsql://` y el
+ * driver HTTP de Postgres no sabe leerla. Si se cayera en ella, el error que
+ * vería el usuario sería un fallo de red sin relación aparente con la
+ * configuración; es mejor que la ausencia de `DATABASE_URL` se note como tal.
  */
-const LOCAL_FILE = process.env.LOCAL_DB || "./data/combustible.db";
-const url = !FORCE_LOCAL && isRemote ? DATABASE_URL : `file:${LOCAL_FILE}`;
+const DATABASE_URL = process.env.DATABASE_URL || "";
 
-export const isTurso = !FORCE_LOCAL && isRemote;
+/**
+ * URI efectiva con la contraseña oculta. Los scripts la imprimen, así que
+ * NUNCA debe contener credenciales.
+ */
+export const URL_EFECTIVA = DATABASE_URL
+  ? DATABASE_URL.replace(/\/\/[^@/]*@/, "//***@")
+  : "(sin DATABASE_URL)";
 
-// El cliente libSQL admite credenciales embebidas en la URL (file:...?authToken=...) y
-// la opción authToken (para libsql://). Se resuelven ambas para máxima compatibilidad.
-function parseUrlCreds(u: string): { url: string; token?: string } {
-  const m = u.match(/^(.*?)(?:\?authToken=(.*))?$/);
-  if (!m) return { url: u };
-  return { url: m[1], token: m[2] || undefined };
-}
+/**
+ * Cliente HTTP de Neon.
+ *
+ * Si falta la URL se construye con un valor inerte: así el proyecto compila y
+ * la página falla al consultar (con un error claro) en lugar de romper en
+ * tiempo de build, que es donde es más difícil de diagnosticar.
+ */
+const cliente = neon(DATABASE_URL || "postgresql://sin-configurar@localhost/sin-configurar");
 
-const { url: cleanUrl, token: urlToken } = parseUrlCreds(url);
+/** Instancia Drizzle del driver HTTP de Neon. */
+export const db = drizzle(cliente, { schema });
 
-const client: Client = createClient({
-  url: cleanUrl,
-  authToken: isRemote
-    ? DATABASE_AUTH_TOKEN || urlToken || undefined
-    : urlToken || undefined,
-});
+/**
+ * Tipo del cliente, para firmas que lo reciben como parámetro
+ * (`ingestEstaciones(db, …)`). Antes era `LibSQLDatabase<typeof schema>`;
+ * tenerlo en un solo sitio evita que cada módulo adivine el dialecto.
+ */
+export type DB = typeof db;
 
-/** Instancia Drizzle del driver libSQL (async). */
-export const db = drizzle(client, { schema });
+/** ¿Estamos configurados contra Postgres? (diagnóstico de scripts y healthcheck) */
+export const isPostgres = /^postgres(ql)?:\/\//.test(DATABASE_URL);
+/** Nombre heredado del motor anterior; se mantiene para no romper imports. */
+export const isTurso = false;
 
-/** URI efectiva en uso (sin credenciales), para logs de scripts y pruebas. */
-export const URL_EFECTIVA = isRemote && !FORCE_LOCAL ? DATABASE_URL : `file:${LOCAL_FILE}`;
+/** ¿Hay una URL configurada? (diagnóstico: distinguir "falta config" de "la BD falla") */
+export const hayUrl = DATABASE_URL.length > 0;
 
-// ─── Envolturas async unificadas ───────────────────────────────────────────
+// ─── Envolturas async unificadas ────────────────────────────────────────────
 
 /** Ejecuta un SELECT y devuelve todas las filas como objetos planos. */
 export async function queryAll<T = Record<string, unknown>>(query: SQL): Promise<T[]> {
-  const rows = await db.all(query);
-  return rows as unknown as T[];
+  const resultado = await db.execute(query);
+  return (resultado as unknown as { rows: T[] }).rows;
 }
 
 /** Ejecuta un SELECT y devuelve la primera fila o undefined. */
 export async function queryGet<T = Record<string, unknown>>(query: SQL): Promise<T | undefined> {
-  const row = await db.get(query);
-  return row as unknown as (T | undefined);
+  const filas = await queryAll<T>(query);
+  return filas[0];
 }
 
 /** Ejecuta un INSERT/UPDATE/DELETE. Devuelve el número de filas afectadas. */
 export async function queryRun(query: SQL): Promise<number> {
-  const result = await db.run(query);
-  return result.rowsAffected;
+  const resultado = await db.execute(query);
+  return Number((resultado as unknown as { rowCount?: number }).rowCount ?? 0);
 }
 
-/**
- * Ejecuta varias sentencias en lote (transaccional en Turso).
- * Usado por la ingesta para upserts atómicos.
+/*
+ * NOTA: aquí vivía `queryDDL()`, que troceaba un bloque de DDL y le quitaba
+ * las claves foráneas. Se ha eliminado junto con los `CREATE TABLE` que los
+ * scripts de seed llevaban dentro: eran un SEGUNDO esquema, distinto del de
+ * `schema.ts` (usaban `REAL`, que en Postgres es float4, no double precision).
+ *
+ * El esquema tiene una sola fuente de verdad:
+ *
+ *   src/lib/db/schema.ts  →  npm run db:generate  →  ./drizzle/*.sql  →  npm run db:migrate
+ *
+ * Las claves foráneas siguen SIN existir, pero ahora por decisión explícita en
+ * `schema.ts` (MITECO publica filas que las incumplen), no por un borrado
+ * silencioso de texto.
  */
-export async function queryBatch(queries: SQL[]): Promise<void> {
-  if (queries.length === 0) return;
-  await client.batch(
-    queries.map((q) => ({ sql: q as unknown as string, args: [] })),
-    "write"
-  );
-}
 
 /** Comprueba que la BD responde (usado por el healthcheck). */
 export async function dbPing(): Promise<boolean> {

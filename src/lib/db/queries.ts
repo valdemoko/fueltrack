@@ -7,7 +7,7 @@
  * índices existentes.
  */
 import { eq, sql, and, ne, type SQL } from "drizzle-orm";
-import { db } from "@/lib/db";
+import { db, queryAll } from "@/lib/db";
 import * as schema from "./schema";
 import {
   cacheada,
@@ -19,7 +19,7 @@ import {
 
 /** SELECT genérico tipado contra el driver async (equivale al antiguo db.all síncrono). */
 function all<T>(q: SQL): Promise<T[]> {
-  return db.all(q) as unknown as Promise<T[]>;
+  return queryAll<T>(q);
 }
 
 /**
@@ -27,26 +27,26 @@ function all<T>(q: SQL): Promise<T[]> {
  * Lee `resumen_nacional` (1 fila) si existe; si no, seek sobre `precios`.
  */
 export async function getUltimaFechaProducto(productoId: number): Promise<string | null> {
-  const fila = await db
+  const fila = (await db
     .select({ fecha: schema.resumenNacional.fecha })
     .from(schema.resumenNacional)
     .where(eq(schema.resumenNacional.productoId, productoId))
-    .get();
+    .execute())[0];
   if (fila?.fecha) return fila.fecha;
-  const row = await db
+  const row = (await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
     .from(schema.precios)
     .where(eq(schema.precios.productoId, productoId))
-    .get();
+    .execute())[0];
   return row?.fecha ?? null;
 }
 
 /** Última fecha de observación disponible en toda la base de datos. */
 export async function getUltimaFechaGlobal(): Promise<string | null> {
-  const row = await db
+  const row = (await db
     .select({ fecha: sql<string>`MAX(${schema.precios.fechaObservacion})` })
     .from(schema.precios)
-    .get();
+    .execute())[0];
   return row?.fecha ?? null;
 }
 
@@ -112,7 +112,7 @@ async function resumenProductoInterna(
   // existe o no tiene la fila (primer arranque), cae al cálculo clásico.
   if (!ambito.municipioId && !ambito.provinciaId && !ambito.ccaaId) {
     try {
-      const r = await db
+      const r = (await db
         .select({
           productoId: schema.resumenNacional.productoId,
           nombre: schema.productos.nombre,
@@ -125,7 +125,7 @@ async function resumenProductoInterna(
         .from(schema.resumenNacional)
         .innerJoin(schema.productos, eq(schema.productos.id, schema.resumenNacional.productoId))
         .where(eq(schema.resumenNacional.productoId, productoId))
-        .get();
+        .execute())[0];
       if (r && r.totalEstaciones > 0) {
         return {
           productoId: r.productoId,
@@ -157,10 +157,10 @@ async function resumenProductoInterna(
         pr.producto_id,
         p.nombre,
         p.abreviatura,
-        ROUND(AVG(pr.precio), 4) AS precio_medio,
+        ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio,
         MIN(pr.precio) AS precio_min,
         MAX(pr.precio) AS precio_max,
-        COUNT(DISTINCT pr.estacion_id) AS total_estaciones
+        COUNT(DISTINCT pr.estacion_id)::int AS total_estaciones
       FROM precios pr
       JOIN productos p ON p.id = pr.producto_id
       JOIN estaciones e ON e.id = pr.estacion_id
@@ -235,8 +235,8 @@ async function municipiosDeProvinciaInterna(
       SELECT
         m.id AS municipio_id,
         m.nombre AS municipio_nombre,
-        COUNT(DISTINCT e.id) AS total_estaciones,
-        ROUND(AVG(pr.precio), 4) AS precio_medio,
+        COUNT(DISTINCT e.id)::int AS total_estaciones,
+        ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio,
         MIN(pr.precio) AS precio_min,
         MAX(pr.precio) AS precio_max
       FROM municipios m
@@ -247,7 +247,9 @@ async function municipiosDeProvinciaInterna(
         AND pr.precio IS NOT NULL
       WHERE m.provincia_id = ${provinciaId}
       GROUP BY m.id, m.nombre
-      HAVING total_estaciones > 0
+      -- Postgres no acepta el alias en HAVING (SQLite sí): hay que repetir
+      -- la expresión.
+      HAVING COUNT(DISTINCT e.id) > 0
       ORDER BY m.nombre ASC
     `);
 
@@ -299,6 +301,7 @@ async function estacionesDeMunicipioInterna(
     fecha_actualizacion: string;
     precio: number | null;
   }>(sql`
+    SELECT * FROM (
       SELECT
         e.id,
         e.rotulo,
@@ -315,8 +318,12 @@ async function estacionesDeMunicipioInterna(
         ) AS precio
       FROM estaciones e
       WHERE e.municipio_id = ${municipioId}
-      ORDER BY precio IS NULL, precio ASC, e.localidad ASC, e.id ASC
-      LIMIT ${limite}
+    ) t
+    -- El ORDER BY va FUERA de la subconsulta: Postgres solo resuelve un alias
+    -- en ORDER BY si aparece solo, y aquí se usa dentro de una expresión
+    -- (precio IS NULL), que SQLite admitía y Postgres no.
+    ORDER BY t.precio IS NULL, t.precio ASC, t.localidad ASC, t.id ASC
+    LIMIT ${limite}
     `);
   return filas.map((f) => ({
     id: f.id,
@@ -355,6 +362,7 @@ async function estacionesDeProvinciaInterna(
     fecha_actualizacion: string;
     precio: number | null;
   }>(sql`
+    SELECT * FROM (
       SELECT
         e.id,
         e.rotulo,
@@ -371,8 +379,10 @@ async function estacionesDeProvinciaInterna(
         ) AS precio
       FROM estaciones e
       WHERE e.provincia_id = ${provinciaId}
-      ORDER BY precio IS NULL, precio ASC, e.localidad ASC, e.id ASC
-      LIMIT ${limite}
+    ) t
+    -- El ORDER BY va FUERA de la subconsulta (ver nota en getEstacionesDeMunicipio).
+    ORDER BY t.precio IS NULL, t.precio ASC, t.localidad ASC, t.id ASC
+    LIMIT ${limite}
     `);
   return filas.map((f) => ({
     id: f.id,
@@ -493,7 +503,7 @@ export interface CcaaInfo {
 
 export async function getCcaaConEstaciones(): Promise<CcaaInfo[]> {
   const filas = await all<{ id: string; nombre: string; total_estaciones: number }>(sql`
-      SELECT c.id, c.nombre, COUNT(e.id) AS total_estaciones
+      SELECT c.id, c.nombre, COUNT(e.id)::int AS total_estaciones
       FROM ccaa c
       JOIN estaciones e ON e.ccaa_id = c.id
       GROUP BY c.id, c.nombre
@@ -512,7 +522,7 @@ export async function getCcaaById(id: string): Promise<{ id: string; nombre: str
       .select({ id: schema.ccaa.id, nombre: schema.ccaa.nombre })
       .from(schema.ccaa)
       .where(eq(schema.ccaa.id, id))
-      .get()) ?? null
+      .execute())[0] ?? null
   );
 }
 
@@ -527,7 +537,7 @@ export interface ProvinciaInfo {
 export async function getProvinciasDeCcaa(ccaaId: string): Promise<ProvinciaInfo[]> {
   const filas = (await await all(sql`
       SELECT p.id, p.nombre, p.ccaa_id, c.nombre AS ccaa_nombre,
-             COUNT(e.id) AS total_estaciones
+             COUNT(e.id)::int AS total_estaciones
       FROM provincias p
       JOIN ccaa c ON c.id = p.ccaa_id
       JOIN estaciones e ON e.provincia_id = p.id
@@ -755,10 +765,10 @@ async function comparativaZonaInterna(
     total_estaciones: number;
   }>(sql`
       SELECT
-        ROUND(AVG(pr.precio), 4) AS precio_medio,
+        ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio,
         MIN(pr.precio) AS precio_min,
         MAX(pr.precio) AS precio_max,
-        COUNT(DISTINCT pr.estacion_id) AS total_estaciones
+        COUNT(DISTINCT pr.estacion_id)::int AS total_estaciones
       FROM precios pr
       JOIN estaciones e ON e.id = pr.estacion_id
       WHERE e.municipio_id = ${municipioId}
@@ -837,7 +847,9 @@ async function estacionesCercanasInterna(
           e.localidad,
           (
             6371 * acos(
-              MIN(1.0,
+              -- LEAST, no MIN: en Postgres MIN() es un agregado y la versión
+              -- escalar de dos argumentos es LEAST() (SQLite usa MIN).
+              LEAST(1.0,
                 COS(RADIANS(${latitud})) * COS(RADIANS(e.latitud)) *
                 COS(RADIANS(e.longitud) - RADIANS(${longitud})) +
                 SIN(RADIANS(${latitud})) * SIN(RADIANS(e.latitud))
@@ -881,7 +893,7 @@ export async function getMunicipiosConEstaciones() {
     total_estaciones: number;
   }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
-             COUNT(e.id) AS total_estaciones
+             COUNT(e.id)::int AS total_estaciones
       FROM municipios m
       JOIN estaciones e ON e.municipio_id = m.id
       GROUP BY m.id, m.nombre
@@ -897,12 +909,12 @@ export async function getMunicipiosConConteo(provinciaId: string) {
     total_estaciones: number;
   }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
-             COUNT(e.id) AS total_estaciones
+             COUNT(e.id)::int AS total_estaciones
       FROM municipios m
       JOIN estaciones e ON e.municipio_id = m.id
       WHERE m.provincia_id = ${provinciaId}
       GROUP BY m.id, m.nombre
-      HAVING total_estaciones > 0
+      HAVING COUNT(e.id) > 0
       ORDER BY total_estaciones DESC, m.nombre ASC
     `);
 }
@@ -924,10 +936,10 @@ export async function getPreciosMedios() {
     total_estaciones: number;
   }>(sql`
       SELECT pr.producto_id, p.nombre, p.abreviatura,
-             ROUND(AVG(pr.precio), 4) AS precio_medio,
+             ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio,
              MIN(pr.precio) AS precio_min,
              MAX(pr.precio) AS precio_max,
-             COUNT(DISTINCT pr.estacion_id) AS total_estaciones
+             COUNT(DISTINCT pr.estacion_id)::int AS total_estaciones
       FROM precios pr
       JOIN productos p ON p.id = pr.producto_id
       WHERE pr.precio IS NOT NULL
@@ -1004,10 +1016,10 @@ export async function getPreciosPorMunicipio(productoId: number) {
     total_estaciones: number;
   }>(sql`
       SELECT m.id AS municipio_id, m.nombre AS municipio_nombre,
-             ROUND(AVG(pr.precio), 4) AS precio_medio,
+             ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio,
              MIN(pr.precio) AS precio_min,
              MAX(pr.precio) AS precio_max,
-             COUNT(DISTINCT pr.estacion_id) AS total_estaciones
+             COUNT(DISTINCT pr.estacion_id)::int AS total_estaciones
       FROM precios pr
       JOIN estaciones e ON e.id = pr.estacion_id
       JOIN municipios m ON m.id = e.municipio_id

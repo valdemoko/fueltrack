@@ -1,0 +1,893 @@
+{
+  "id": "514e0f95-014f-40ec-a824-6847149413d2",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.ccaa": {
+      "name": "ccaa",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.estaciones": {
+      "name": "estaciones",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "municipio_id": {
+          "name": "municipio_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provincia_id": {
+          "name": "provincia_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ccaa_id": {
+          "name": "ccaa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "rotulo": {
+          "name": "rotulo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "direccion": {
+          "name": "direccion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "localidad": {
+          "name": "localidad",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "codigo_postal": {
+          "name": "codigo_postal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "latitud": {
+          "name": "latitud",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "longitud": {
+          "name": "longitud",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "horario": {
+          "name": "horario",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "margen": {
+          "name": "margen",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo_venta": {
+          "name": "tipo_venta",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "bioetanol_pct": {
+          "name": "bioetanol_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ester_metilico_pct": {
+          "name": "ester_metilico_pct",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "fecha_actualizacion": {
+          "name": "fecha_actualizacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_estaciones_municipio": {
+          "name": "idx_estaciones_municipio",
+          "columns": [
+            {
+              "expression": "municipio_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_estaciones_provincia": {
+          "name": "idx_estaciones_provincia",
+          "columns": [
+            {
+              "expression": "provincia_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_estaciones_ccaa": {
+          "name": "idx_estaciones_ccaa",
+          "columns": [
+            {
+              "expression": "ccaa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_ccaa_mes": {
+      "name": "hist_ccaa_mes",
+      "schema": "",
+      "columns": {
+        "ccaa_id": {
+          "name": "ccaa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mes": {
+          "name": "mes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_ccaa_mes_ccaa_id_producto_id_mes_pk": {
+          "name": "hist_ccaa_mes_ccaa_id_producto_id_mes_pk",
+          "columns": [
+            "ccaa_id",
+            "producto_id",
+            "mes"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_estacion_mes": {
+      "name": "hist_estacion_mes",
+      "schema": "",
+      "columns": {
+        "estacion_id": {
+          "name": "estacion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mes": {
+          "name": "mes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_observaciones": {
+          "name": "n_observaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_estacion_mes_estacion_id_producto_id_mes_pk": {
+          "name": "hist_estacion_mes_estacion_id_producto_id_mes_pk",
+          "columns": [
+            "estacion_id",
+            "producto_id",
+            "mes"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_geo_dia": {
+      "name": "hist_geo_dia",
+      "schema": "",
+      "columns": {
+        "ambito": {
+          "name": "ambito",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "geo_id": {
+          "name": "geo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha": {
+          "name": "fecha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_geo_dia_ambito_geo_id_producto_id_fecha_pk": {
+          "name": "hist_geo_dia_ambito_geo_id_producto_id_fecha_pk",
+          "columns": [
+            "ambito",
+            "geo_id",
+            "producto_id",
+            "fecha"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_geo_semana": {
+      "name": "hist_geo_semana",
+      "schema": "",
+      "columns": {
+        "ambito": {
+          "name": "ambito",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "geo_id": {
+          "name": "geo_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "semana": {
+          "name": "semana",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_geo_semana_ambito_geo_id_producto_id_semana_pk": {
+          "name": "hist_geo_semana_ambito_geo_id_producto_id_semana_pk",
+          "columns": [
+            "ambito",
+            "geo_id",
+            "producto_id",
+            "semana"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_meses_procesados": {
+      "name": "hist_meses_procesados",
+      "schema": "",
+      "columns": {
+        "mes": {
+          "name": "mes",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "procesado_en": {
+          "name": "procesado_en",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_mun_mes": {
+      "name": "hist_mun_mes",
+      "schema": "",
+      "columns": {
+        "municipio_id": {
+          "name": "municipio_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mes": {
+          "name": "mes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_mun_mes_municipio_id_producto_id_mes_pk": {
+          "name": "hist_mun_mes_municipio_id_producto_id_mes_pk",
+          "columns": [
+            "municipio_id",
+            "producto_id",
+            "mes"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_nac_dia": {
+      "name": "hist_nac_dia",
+      "schema": "",
+      "columns": {
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha": {
+          "name": "fecha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_nac_dia_producto_id_fecha_pk": {
+          "name": "hist_nac_dia_producto_id_fecha_pk",
+          "columns": [
+            "producto_id",
+            "fecha"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.hist_prov_mes": {
+      "name": "hist_prov_mes",
+      "schema": "",
+      "columns": {
+        "provincia_id": {
+          "name": "provincia_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mes": {
+          "name": "mes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "n_estaciones": {
+          "name": "n_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "hist_prov_mes_provincia_id_producto_id_mes_pk": {
+          "name": "hist_prov_mes_provincia_id_producto_id_mes_pk",
+          "columns": [
+            "provincia_id",
+            "producto_id",
+            "mes"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.municipios": {
+      "name": "municipios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "provincia_id": {
+          "name": "provincia_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_municipios_provincia": {
+          "name": "idx_municipios_provincia",
+          "columns": [
+            {
+              "expression": "provincia_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.precios": {
+      "name": "precios",
+      "schema": "",
+      "columns": {
+        "estacion_id": {
+          "name": "estacion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio": {
+          "name": "precio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fecha_observacion": {
+          "name": "fecha_observacion",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_precios_producto": {
+          "name": "idx_precios_producto",
+          "columns": [
+            {
+              "expression": "producto_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_precios_fecha": {
+          "name": "idx_precios_fecha",
+          "columns": [
+            {
+              "expression": "fecha_observacion",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "precios_estacion_id_producto_id_pk": {
+          "name": "precios_estacion_id_producto_id_pk",
+          "columns": [
+            "estacion_id",
+            "producto_id"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.precios_historico": {
+      "name": "precios_historico",
+      "schema": "",
+      "columns": {
+        "estacion_id": {
+          "name": "estacion_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha": {
+          "name": "fecha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio": {
+          "name": "precio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "precios_historico_estacion_id_producto_id_fecha_pk": {
+          "name": "precios_historico_estacion_id_producto_id_fecha_pk",
+          "columns": [
+            "estacion_id",
+            "producto_id",
+            "fecha"
+          ]
+        }
+      },
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.productos": {
+      "name": "productos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "abreviatura": {
+          "name": "abreviatura",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.provincias": {
+      "name": "provincias",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "ccaa_id": {
+          "name": "ccaa_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nombre": {
+          "name": "nombre",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "idx_provincias_ccaa": {
+          "name": "idx_provincias_ccaa",
+          "columns": [
+            {
+              "expression": "ccaa_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.resumen_nacional": {
+      "name": "resumen_nacional",
+      "schema": "",
+      "columns": {
+        "producto_id": {
+          "name": "producto_id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "precio_medio": {
+          "name": "precio_medio",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_min": {
+          "name": "precio_min",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "precio_max": {
+          "name": "precio_max",
+          "type": "double precision",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "total_estaciones": {
+          "name": "total_estaciones",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "fecha": {
+          "name": "fecha",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {},
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

@@ -18,11 +18,11 @@ export async function GET(
 
   try {
     // Buscar estación
-    const estacion = await db
+    const estacion = (await db
       .select()
       .from(schema.estaciones)
       .where(eq(schema.estaciones.id, id))
-      .get();
+      .execute())[0];
 
     if (!estacion) {
       return NextResponse.json(
@@ -46,7 +46,7 @@ export async function GET(
         eq(schema.precios.productoId, schema.productos.id)
       )
       .where(eq(schema.precios.estacionId, id))
-      .all();
+      .execute();
 
     // Agrupar precios por producto
     const preciosPorProducto: Record<

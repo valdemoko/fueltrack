@@ -6,8 +6,25 @@
  * POR QUÉ
  *   Un fallo ahí podría tardar meses en detectarse, y el cierre ESCRIBE medias
  *   permanentes: si se calculara con datos parciales, corrompería el histórico.
- *   Se prueban contra una COPIA del fichero local: no se toca la BD de trabajo
- *   y no se gasta cuota (0 escrituras en Turso, todo local).
+ *   Un fallo en la PURGA es aún peor: borra datos que ya no se pueden recuperar.
+ *
+ * ── CÓMO SE PRUEBA SIN ARRIESGAR NADA (rama de Neon) ─────────────────────
+ *
+ *   Este script BORRA datos a propósito (es lo que hace la retención), así que
+ *   NUNCA debe apuntar a la base de datos de trabajo. La forma correcta en
+ *   Neon es una RAMA del proyecto: es una copia por referencia (instantánea,
+ *   sin duplicar almacenamiento) con su propia URL, y los cambios que se
+ *   hagan en ella no llegan nunca a `production`.
+ *
+ *     neon branches create --project-id <id> --name pruebas --parent production
+ *     # copia la connection string de esa rama y:
+ *     PRUEBA_DATABASE_URL="postgresql://…-pruebas…" npx tsx scripts/probar-mantenimiento.ts --si
+ *     neon branches delete pruebas --project-id <id>
+ *
+ *   El script aborta si `PRUEBA_DATABASE_URL` no está definida o si es
+ *   idéntica a `DATABASE_URL` (protección contra el accidente obvio).
+ *   El fichero SQLite local (`data/combustible.db`) ya NO sirve de fuente:
+ *   el motor es Postgres y el SQL es distinto.
  *
  * QUÉ COMPRUEBA
  *   1. Cierre de un MES YA CERRADO (por defecto 2026-08) con el histórico
@@ -22,32 +39,60 @@
  *      mes ya marcado como procesado.
  *
  * Uso:
- *   npx tsx scripts/probar-mantenimiento.ts
- *   npx tsx scripts/probar-mantenimiento.ts --mes-cerrado=2026-07 --fuente=./data/combustible.db
+ *   PRUEBA_DATABASE_URL="postgresql://…" npx tsx scripts/probar-mantenimiento.ts --si
+ *   PRUEBA_DATABASE_URL="postgresql://…" npx tsx scripts/probar-mantenimiento.ts --si --mes-cerrado=2026-07
  */
-import { copyFileSync, existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { sql } from "drizzle-orm";
 
 const opcion = (n: string): string | null => {
   const i = process.argv.indexOf(`--${n}`);
   return i >= 0 ? (process.argv[i + 1] ?? null) : null;
 };
-const FUENTE = opcion("fuente") ?? "./data/combustible.db";
-const COPIA = opcion("copia") ?? "./data/pruebas-mantenimiento.db";
 const MES_CERRADO = opcion("mes-cerrado") ?? "2026-08";
 const MES_EN_CURSO = opcion("mes-curso") ?? new Date().toISOString().slice(0, 7);
+const CONFIRMADO = process.argv.includes("--si");
 
-if (!existsSync(FUENTE)) {
-  console.error(`No existe la BD de origen: ${FUENTE}`);
+// ─── Entorno ─────────────────────────────────────────────────────────────────
+
+function cargarEnvLocal() {
+  if (!existsSync(".env.local")) return;
+  for (const linea of readFileSync(".env.local", "utf-8").split(/\r?\n/)) {
+    const m = linea.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*(#.*)?$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+}
+cargarEnvLocal();
+
+const PRODUCCION = process.env.DATABASE_URL ?? "";
+const PRUEBA = process.env.PRUEBA_DATABASE_URL ?? "";
+
+if (!PRUEBA) {
+  console.error(
+    "ABORTADO: falta PRUEBA_DATABASE_URL.\n\n" +
+      "Esta prueba BORRA datos (retención) y reescribe medias mensuales, así que no\n" +
+      "puede correr contra la base de datos de trabajo. Crea una rama desechable:\n\n" +
+      "  neon branches create --project-id <project-id> --name pruebas --parent production\n" +
+      "  PRUEBA_DATABASE_URL='<connection string de la rama>' npx tsx scripts/probar-mantenimiento.ts --si\n" +
+      "  neon branches delete pruebas --project-id <project-id>\n"
+  );
   process.exit(1);
 }
-mkdirSync("./data", { recursive: true });
-copyFileSync(FUENTE, COPIA);
-console.log(`Copia de trabajo: ${COPIA} (${(statSync(COPIA).size / 1e6).toFixed(1)} MB)`);
+if (PRUEBA === PRODUCCION) {
+  console.error("ABORTADO: PRUEBA_DATABASE_URL es idéntica a DATABASE_URL (la BD de trabajo).");
+  process.exit(1);
+}
+if (!CONFIRMADO) {
+  console.error(
+    "ABORTADO: falta --si.\n" +
+      "La prueba purga la retención y recalcula el cierre mensual: solo se ejecuta\n" +
+      `contra una rama desechable. Se usaría: ${PRUEBA.replace(/\/\/[^@/]*@/, "//***@")}\n`
+  );
+  process.exit(1);
+}
 
-// La app debe abrir la COPIA, nunca el original: esto se fija ANTES del import.
-process.env.DB_LOCAL = "1";
-process.env.LOCAL_DB = COPIA;
+// La app debe abrir la RAMA DE PRUEBA: se fija ANTES de importar @/lib/db.
+process.env.DATABASE_URL = PRUEBA;
 
 const fallos: string[] = [];
 const comprobar = (ok: boolean, texto: string) => {
@@ -64,7 +109,7 @@ const TABLAS_MES: Array<{ tabla: string; clave: string }> = [
 ];
 
 async function main() {
-  const { db, URL_EFECTIVA } = await import("@/lib/db");
+  const { URL_EFECTIVA, queryAll, queryGet } = await import("@/lib/db");
   const {
     aplicarRetencion,
     cerrarMes,
@@ -75,15 +120,15 @@ async function main() {
   } = await import("@/lib/db/mantenimiento");
 
   const filas = async (q: string): Promise<number> => {
-    const r = (await db.get(sql.raw(q))) as { n: number } | undefined;
+    const r = await queryGet<{ n: number }>(sql.raw(q));
     return Number(r?.n ?? 0);
   };
   const cuentaMes = (tabla: string, mes: string) =>
     filas(`SELECT COUNT(*) AS n FROM ${tabla} WHERE mes = '${mes}'`);
   const mediaMes = async (tabla: string, mes: string) => {
-    const r = (await db.get(sql.raw(
-      `SELECT ROUND(AVG(precio_medio), 4) AS m FROM ${tabla} WHERE mes = '${mes}'`
-    ))) as { m: number | null } | undefined;
+    const r = await queryGet<{ m: number | string | null }>(sql.raw(
+      `SELECT ROUND(AVG(precio_medio)::numeric, 4) AS m FROM ${tabla} WHERE mes = '${mes}'`
+    ));
     return r?.m === null || r?.m === undefined ? null : Number(r.m);
   };
   /**
@@ -113,10 +158,10 @@ async function main() {
         : `(SELECT ROUND(AVG(h.precio), 4) FROM precios_historico h
              WHERE h.estacion_id = t.${clave} AND h.producto_id = t.producto_id
                AND h.fecha BETWEEN '${desde}' AND '${hasta}' AND h.precio IS NOT NULL)`;
-    const r = (await db.all(sql.raw(
+    const r = await queryAll<{ k: string; p: number; v: number; esperado: number | string | null }>(sql.raw(
       `SELECT t.${clave} AS k, t.producto_id AS p, t.precio_medio AS v, ${subconsulta} AS esperado
        FROM ${tabla} t WHERE t.mes = '${mes}' ORDER BY t.${clave}, t.producto_id LIMIT 250`
-    ))) as unknown as Array<{ k: string; p: number; v: number; esperado: number | null }>;
+    ));
     return r.map((x) => ({
       clave: `${x.k}:${x.p}`,
       guardado: Number(x.v),
@@ -160,11 +205,8 @@ async function main() {
     );
   };
 
-  console.log(`BD en uso: ${URL_EFECTIVA}`);
-  comprobar(
-    URL_EFECTIVA.includes("pruebas-mantenimiento"),
-    "la app trabaja sobre la COPIA (el original no se toca)"
-  );
+  console.log(`BD de prueba: ${URL_EFECTIVA}`);
+  comprobar(URL_EFECTIVA !== PRODUCCION.replace(/\/\/[^@/]*@/, "//***@"), "la app trabaja sobre la RAMA de prueba, no sobre la BD de trabajo");
 
   // ─── 1. Cierre de un mes ya cerrado, con histórico completo ───────────────
   console.log(`\n=== 1. CIERRE DE UN MES YA CERRADO (${MES_CERRADO}) ===`);
@@ -235,7 +277,8 @@ async function main() {
   const estado: Record<string, { fuera: number; dentro: number }> = {};
   for (const v of ventanas) {
     const existe = await filas(
-      `SELECT COUNT(*) AS n FROM sqlite_master WHERE type='table' AND name='${v.tabla}'`
+      `SELECT COUNT(*) AS n FROM information_schema.tables
+       WHERE table_schema = 'public' AND table_name = '${v.tabla}'`
     );
     if (existe === 0) {
       console.log(`- ${v.tabla}: no existe en esta copia, se omite`);
@@ -347,12 +390,7 @@ async function main() {
     console.error(`✗ ${fallos.length} comprobación(es) FALLIDAS:`);
     for (const f of fallos) console.error(`   · ${f}`);
   }
-  try {
-    for (const s of ["", "-shm", "-wal"]) rmSync(`${COPIA}${s}`, { force: true });
-    console.log("(copia de trabajo borrada)");
-  } catch {
-    console.log(`(la copia sigue abierta por el driver: puedes borrar ${COPIA} a mano)`);
-  }
+  console.log("(la rama de prueba sigue existiendo: bórrala con `neon branches delete`)");
   if (fallos.length) process.exit(1);
 }
 

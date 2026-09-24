@@ -34,11 +34,14 @@ yarn-error.log*
 .env*
 !.env.example
 
-# database
+# database (volcado SQLite local, ~267 MB: NO se sube)
 /data/
 
-# drizzle
-/drizzle/
+# OJO: /drizzle/ NO se ignora. Los ficheros SQL de ./drizzle son la ÚNICA
+# definición aplicable del esquema (schema.ts se compila a ese SQL con
+# `npm run db:generate` y `npm run db:migrate` los aplica y los marca como
+# aplicados). Si se ignoraran, un clon del repositorio no tendría forma de
+# crear la base de datos.
 
 # vercel
 .vercel

@@ -8,7 +8,7 @@
  * 4. Almacenar observaciones de precio
  */
 import { eq, and, sql } from "drizzle-orm";
-import type { LibSQLDatabase } from "drizzle-orm/libsql";
+import { queryAll, queryGet, type DB } from "@/lib/db";
 import * as schema from "@/lib/db/schema";
 import type {
   MitecoEstacionRaw,
@@ -160,7 +160,7 @@ function enLotes<T>(items: T[], tamano = FILAS_POR_SENTENCIA): T[][] {
  * Upsert de estaciones en lote (troceado en varias sentencias).
  */
 async function upsertEstacionesLote(
-  database: LibSQLDatabase<typeof schema>,
+  database: DB,
   estaciones: EstacionNormalizada[]
 ): Promise<void> {
   if (estaciones.length === 0) return;
@@ -204,7 +204,7 @@ async function upsertEstacionesLote(
         fechaActualizacion: sql`excluded.fecha_actualizacion`,
       },
     })
-    .run();
+    .execute();
   }
 }
 
@@ -226,7 +226,7 @@ async function upsertEstacionesLote(
  * el conteo no cuadra y se escribe el día nuevo con normalidad.
  */
 async function upsertPreciosLote(
-  database: LibSQLDatabase<typeof schema>,
+  database: DB,
   precios: PrecioNormalizado[],
   soloHistorico = false
 ): Promise<void> {
@@ -255,19 +255,19 @@ async function upsertPreciosLote(
             fechaObservacion: sql`excluded.fecha_observacion`,
           },
         })
-        .run();
+        .execute();
     }
   }
 
   // ── Histórico: solo si falta alguna fila del día para estas estaciones ──
   const fecha = conPrecio[0].fechaObservacion;
   const estacionIds = [...new Set(conPrecio.map((p) => p.estacionId))];
-  const yaEscritas = (await database.get(sql`
+  const yaEscritas = await queryGet<{ n: number }>(sql`
     SELECT COUNT(*) AS n
     FROM precios_historico
     WHERE fecha = ${fecha}
       AND estacion_id IN (${sql.join(estacionIds.map((id) => sql`${id}`), sql`, `)})
-  `)) as { n: number } | undefined;
+  `);
 
   if (Number(yaEscritas?.n ?? 0) >= conPrecio.length) {
     console.log(
@@ -297,7 +297,7 @@ async function upsertPreciosLote(
           precio: sql`excluded.precio`,
         },
       })
-      .run();
+      .execute();
   }
 }
 
@@ -310,7 +310,7 @@ async function upsertPreciosLote(
  * @returns Número de estaciones procesadas
  */
 export async function ingestEstaciones(
-  db: LibSQLDatabase<typeof schema>,
+  db: DB,
   provinciaId: string
 ): Promise<number> {
   console.log(`[ingest] Obteniendo estaciones de provincia ${provinciaId}...`);
@@ -355,7 +355,7 @@ export async function ingestEstaciones(
  * Usa una única consulta previa por lote (no una por estación).
  */
 async function validarLote(
-  database: LibSQLDatabase<typeof schema>,
+  database: DB,
   precios: PrecioNormalizado[],
   fechaObservacion: string
 ): Promise<{ validos: PrecioNormalizado[] }> {
@@ -368,7 +368,11 @@ async function validarLote(
   // con 11k parámetros desbordaría).
   const previos = new Map<string, number>();
   for (const lote of enLotes(estacionIds, 500)) {
-    const filas = (await database.all(sql`
+    const filas = await queryAll<{
+      estacion_id: string;
+      producto_id: number;
+      precio: number;
+    }>(sql`
       SELECT estacion_id, producto_id, precio
       FROM precios p
       WHERE p.fecha_observacion = (
@@ -379,7 +383,7 @@ async function validarLote(
       )
         AND p.precio IS NOT NULL
         AND p.estacion_id IN (${sql.join(lote.map((id) => sql`${id}`), sql`, `)})
-    `)) as unknown as Array<{ estacion_id: string; producto_id: number; precio: number }>;
+    `);
 
     for (const f of filas) {
       previos.set(`${f.estacion_id}:${f.producto_id}`, f.precio);
@@ -421,7 +425,7 @@ async function validarLote(
  * @returns Número de estaciones procesadas
  */
 export async function ingestHistorico(
-  db: LibSQLDatabase<typeof schema>,
+  db: DB,
   fecha: string,
   soloHistorico = false
 ): Promise<number> {
@@ -469,7 +473,7 @@ export async function ingestHistorico(
  * @returns Número de productos procesados
  */
 export async function ingestProductos(
-  db: LibSQLDatabase<typeof schema>
+  db: DB
 ): Promise<number> {
   console.log("[ingest] Obteniendo productos petrolíferos...");
 
@@ -489,7 +493,7 @@ export async function ingestProductos(
           abreviatura: prod.NombreProductoAbreviatura,
         },
       })
-      .run();
+      .execute();
   }
 
   console.log(`[ingest] Productos completados: ${productos.length} productos`);

@@ -46,14 +46,14 @@ export async function GET(request: Request) {
       .where(and(...conditions))
       .limit(limite)
       .offset(offset)
-      .all();
+      .execute();
 
     // Contar total
     const total = (await db
       .select({ count: sql<number>`count(*)` })
       .from(schema.estaciones)
       .where(eq(schema.estaciones.provinciaId, PROVINCIA_MALAGA))
-      .get())?.count ?? 0;
+      .execute())[0]?.count ?? 0;
 
     return NextResponse.json({
       total,

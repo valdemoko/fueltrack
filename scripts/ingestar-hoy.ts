@@ -4,18 +4,19 @@
  * Reproduce la lógica del cron de Vercel (mismas funciones de ingesta y
  * mantenimiento), pero sin límite de 60 s: útil para poner al día una BD
  * tras una migración o para disparar la actualización fuera de la ventana
- * de las 06:00 UTC.
+ * del cron.
  *
  * Uso:
  *   npx tsx scripts/ingestar-hoy.ts                 # ingesta + mantenimiento
  *   npx tsx scripts/ingestar-hoy.ts --sin-mantenimiento
  *   npx tsx scripts/ingestar-hoy.ts --provincia 29  # solo una provincia (prueba)
+ *
+ * Trabaja contra `DATABASE_URL` (Neon). Antes de escribir comprueba que la BD
+ * responde y que tiene el esquema creado: es preferible un error claro aquí
+ * que una ingesta a medias contra una base vacía.
  */
 import { readFileSync, existsSync } from "node:fs";
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
-import * as schema from "@/lib/db/schema";
-import { ingestEstaciones, ingestProductos } from "@/lib/miteco/ingestion";
+import { sql } from "drizzle-orm";
 
 // ─── Env ─────────────────────────────────────────────────────────────────────
 
@@ -27,26 +28,6 @@ function cargarEnvLocal() {
   }
 }
 cargarEnvLocal();
-
-const HOSTS_PROHIBIDOS = [
-  "fueltrack-valdemokoo.aws-eu-west-1.turso.io",
-  "combustible-webssssss.aws-eu-west-1.turso.io",
-  "gasofa-proyectoss.aws-eu-west-1.turso.io",
-  "combustible-final.aws-eu-west-1.turso.io",
-];
-
-const URL_BD = process.env.TURSO_DATABASE_URL;
-const TOKEN = process.env.TURSO_AUTH_TOKEN;
-if (!URL_BD || !TOKEN) {
-  console.error("Faltan TURSO_DATABASE_URL / TURSO_AUTH_TOKEN en .env.local");
-  process.exit(1);
-}
-for (const host of HOSTS_PROHIBIDOS) {
-  if (URL_BD.includes(host)) {
-    console.error(`BLOQUEADO: la URL apunta a una BD anterior (${host})`);
-    process.exit(1);
-  }
-}
 
 const SOLO_PROVINCIA = (() => {
   const i = process.argv.indexOf("--provincia");
@@ -64,16 +45,43 @@ const PROVINCIAS = [
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-const client = createClient({ url: URL_BD, authToken: TOKEN });
-const db = drizzle(client, { schema });
-
-async function fechaMaxima(): Promise<string | null> {
-  const r = await client.execute("SELECT MAX(fecha_observacion) f FROM precios");
-  return (r.rows[0]?.f as string) ?? null;
-}
-
 async function main() {
-  console.log(`BD: ${URL_BD}`);
+  // Import dinámico: `@/lib/db` lee el entorno al importarse, así que debe
+  // hacerse DESPUÉS de cargar .env.local.
+  const { db, queryGet, URL_EFECTIVA, isPostgres } = await import("@/lib/db");
+  const { ingestEstaciones, ingestProductos } = await import("@/lib/miteco/ingestion");
+
+  if (!isPostgres) {
+    console.error(
+      `ABORTADO: DATABASE_URL no apunta a Postgres/Neon (${URL_EFECTIVA}).\n` +
+        "Comprueba .env.local o exporta DATABASE_URL."
+    );
+    process.exit(1);
+  }
+  console.log(`BD: ${URL_EFECTIVA}`);
+
+  const fechaMaxima = async (): Promise<string | null> => {
+    const r = await queryGet<{ f: string | null }>(
+      sql`SELECT MAX(fecha_observacion) AS f FROM precios`
+    );
+    return r?.f ?? null;
+  };
+
+  // Comprobación previa: que el esquema exista. Escribir contra una base sin
+  // tablas fallaría provincia a provincia con errores crípticos.
+  const tablas = await queryGet<{ n: number }>(sql`
+    SELECT COUNT(*) AS n FROM information_schema.tables
+    WHERE table_schema = 'public'
+  `);
+  const nTablas = Number(tablas?.n ?? 0);
+  if (nTablas === 0) {
+    console.error(
+      "ABORTADO: la BD responde pero no tiene tablas.\n" +
+        "Crea el esquema primero (npm run db:generate + aplicación del SQL) o migra los datos."
+    );
+    process.exit(1);
+  }
+  console.log(`Tablas en el esquema: ${nTablas}`);
   console.log(`Fecha máxima actual: ${await fechaMaxima()}\n`);
 
   // 1. Catálogo de productos (idempotente)
@@ -111,8 +119,8 @@ async function main() {
 
   if (!CON_MANTENIMIENTO) return;
 
-  // 3. Mantenimiento diario: agregados del día + retención semanal +
-  //    cierre mensual + refresh de resumen_nacional.
+  // 3. Mantenimiento diario: agregados del día + retención + cierre mensual +
+  //    refresh de resumen_nacional.
   console.log("\n→ Mantenimiento diario (agregados, retención, resumen_nacional)...");
   const { mantenimientoDiario } = await import("@/lib/db/mantenimiento");
   const mant = await mantenimientoDiario(false);
