@@ -138,17 +138,37 @@ export function extraerPrecios(
 // ─── Ingestión en base de datos ─────────────────────────────────────────────
 
 /**
- * Upsert de estaciones en un lote (una sola llamada a la BD).
+ * Filas por sentencia INSERT.
+ *
+ * Una provincia cabe en un lote, pero una ingesta de DÍA COMPLETO (relleno
+ * histórico: ~11k estaciones × ~10 productos) genera decenas de miles de
+ * tuplas y revienta la pila al construir la consulta. Trocear mantiene cada
+ * sentencia en un tamaño seguro y no cambia el número de filas escritas.
+ */
+const FILAS_POR_SENTENCIA = 400;
+
+/** Divide una lista en trozos de tamaño fijo. */
+function enLotes<T>(items: T[], tamano = FILAS_POR_SENTENCIA): T[][] {
+  const lotes: T[][] = [];
+  for (let i = 0; i < items.length; i += tamano) {
+    lotes.push(items.slice(i, i + tamano));
+  }
+  return lotes;
+}
+
+/**
+ * Upsert de estaciones en lote (troceado en varias sentencias).
  */
 async function upsertEstacionesLote(
   database: LibSQLDatabase<typeof schema>,
   estaciones: EstacionNormalizada[]
 ): Promise<void> {
   if (estaciones.length === 0) return;
+  for (const lote of enLotes(estaciones)) {
   await database
     .insert(schema.estaciones)
     .values(
-      estaciones.map((estacion) => ({
+      lote.map((estacion) => ({
         id: estacion.id,
         municipioId: estacion.municipioId,
         provinciaId: estacion.provinciaId,
@@ -185,6 +205,7 @@ async function upsertEstacionesLote(
       },
     })
     .run();
+  }
 }
 
 /**
@@ -196,54 +217,88 @@ async function upsertEstacionesLote(
  *  2. `precios_historico`: observación diaria dentro de la ventana corta.
  *     PK (estación, producto, fecha) → idempotente; el mantenimiento
  *     diario borra lo que sale de la ventana.
+ *
+ * AHORRO DE CUOTA (rows written): la foto histórica del día NO cambia entre
+ * pasadas del cron, solo el precio actual. Antes de escribir el histórico se
+ * cuenta cuántas filas de (estación, producto, fecha) ya existen: si están
+ * todas, se salta el lote entero (1 lectura indexada ≈ 900 filas en vez de
+ * ~900 escrituras). Si MITECO cambió la fecha del parte (publicación tardía),
+ * el conteo no cuadra y se escribe el día nuevo con normalidad.
  */
 async function upsertPreciosLote(
   database: LibSQLDatabase<typeof schema>,
-  precios: PrecioNormalizado[]
+  precios: PrecioNormalizado[],
+  soloHistorico = false
 ): Promise<void> {
   const conPrecio = precios.filter((p) => p.precio !== null);
   if (conPrecio.length === 0) return;
 
-  await database
-    .insert(schema.precios)
-    .values(
-      conPrecio.map((precio) => ({
-        estacionId: precio.estacionId,
-        productoId: precio.productoId,
-        fechaObservacion: precio.fechaObservacion,
-        precio: precio.precio,
-      }))
-    )
-    .onConflictDoUpdate({
-      target: [schema.precios.estacionId, schema.precios.productoId],
-      set: {
-        precio: sql`excluded.precio`,
-        fechaObservacion: sql`excluded.fecha_observacion`,
-      },
-    })
-    .run();
+  // `soloHistorico` (relleno de fechas pasadas): NUNCA tocar la tabla de
+  // precios ACTUALES. Escribir ahí una fecha antigua dejaría a la web
+  // mostrando un precio "actual" que en realidad es de hace días.
+  if (!soloHistorico) {
+    for (const lote of enLotes(conPrecio)) {
+      await database
+        .insert(schema.precios)
+        .values(
+          lote.map((precio) => ({
+            estacionId: precio.estacionId,
+            productoId: precio.productoId,
+            fechaObservacion: precio.fechaObservacion,
+            precio: precio.precio,
+          }))
+        )
+        .onConflictDoUpdate({
+          target: [schema.precios.estacionId, schema.precios.productoId],
+          set: {
+            precio: sql`excluded.precio`,
+            fechaObservacion: sql`excluded.fecha_observacion`,
+          },
+        })
+        .run();
+    }
+  }
 
-  await database
-    .insert(schema.preciosHistorico)
-    .values(
-      conPrecio.map((precio) => ({
-        estacionId: precio.estacionId,
-        productoId: precio.productoId,
-        fecha: precio.fechaObservacion,
-        precio: precio.precio,
-      }))
-    )
-    .onConflictDoUpdate({
-      target: [
-        schema.preciosHistorico.estacionId,
-        schema.preciosHistorico.productoId,
-        schema.preciosHistorico.fecha,
-      ],
-      set: {
-        precio: sql`excluded.precio`,
-      },
-    })
-    .run();
+  // ── Histórico: solo si falta alguna fila del día para estas estaciones ──
+  const fecha = conPrecio[0].fechaObservacion;
+  const estacionIds = [...new Set(conPrecio.map((p) => p.estacionId))];
+  const yaEscritas = (await database.get(sql`
+    SELECT COUNT(*) AS n
+    FROM precios_historico
+    WHERE fecha = ${fecha}
+      AND estacion_id IN (${sql.join(estacionIds.map((id) => sql`${id}`), sql`, `)})
+  `)) as { n: number } | undefined;
+
+  if (Number(yaEscritas?.n ?? 0) >= conPrecio.length) {
+    console.log(
+      `[ingest] Histórico ${fecha} ya escrito para ${estacionIds.length} estaciones: 0 escrituras`
+    );
+    return;
+  }
+
+  for (const lote of enLotes(conPrecio)) {
+    await database
+      .insert(schema.preciosHistorico)
+      .values(
+        lote.map((precio) => ({
+          estacionId: precio.estacionId,
+          productoId: precio.productoId,
+          fecha: precio.fechaObservacion,
+          precio: precio.precio,
+        }))
+      )
+      .onConflictDoUpdate({
+        target: [
+          schema.preciosHistorico.estacionId,
+          schema.preciosHistorico.productoId,
+          schema.preciosHistorico.fecha,
+        ],
+        set: {
+          precio: sql`excluded.precio`,
+        },
+      })
+      .run();
+  }
 }
 
 /**
@@ -307,24 +362,29 @@ async function validarLote(
   const estacionIds = [...new Set(precios.map((p) => p.estacionId))];
   if (estacionIds.length === 0) return { validos: precios };
 
-  // Último precio válido previo por (estación, producto) en una sola query:
-  // fecha máxima anterior a la observación actual.
-  const filas = (await database.all(sql`
-    SELECT estacion_id, producto_id, precio
-    FROM precios p
-    WHERE p.fecha_observacion = (
-      SELECT MAX(p2.fecha_observacion) FROM precios p2
-      WHERE p2.estacion_id = p.estacion_id
-        AND p2.producto_id = p.producto_id
-        AND p2.fecha_observacion < ${fechaObservacion}
-    )
-      AND p.precio IS NOT NULL
-      AND p.estacion_id IN (${sql.join(estacionIds.map((id) => sql`${id}`), sql`, `)})
-  `)) as unknown as Array<{ estacion_id: string; producto_id: number; precio: number }>;
+  // Último precio válido previo por (estación, producto):
+  // fecha máxima anterior a la observación actual. Se consulta por lotes de
+  // estaciones (una ingesta de día completo son ~11k ids: una sola sentencia
+  // con 11k parámetros desbordaría).
+  const previos = new Map<string, number>();
+  for (const lote of enLotes(estacionIds, 500)) {
+    const filas = (await database.all(sql`
+      SELECT estacion_id, producto_id, precio
+      FROM precios p
+      WHERE p.fecha_observacion = (
+        SELECT MAX(p2.fecha_observacion) FROM precios p2
+        WHERE p2.estacion_id = p.estacion_id
+          AND p2.producto_id = p.producto_id
+          AND p2.fecha_observacion < ${fechaObservacion}
+      )
+        AND p.precio IS NOT NULL
+        AND p.estacion_id IN (${sql.join(lote.map((id) => sql`${id}`), sql`, `)})
+    `)) as unknown as Array<{ estacion_id: string; producto_id: number; precio: number }>;
 
-  const previos = new Map(
-    filas.map((f) => [`${f.estacion_id}:${f.producto_id}`, f.precio] as [string, number])
-  );
+    for (const f of filas) {
+      previos.set(`${f.estacion_id}:${f.producto_id}`, f.precio);
+    }
+  }
 
   const validos: PrecioNormalizado[] = [];
   for (const precio of precios) {
@@ -350,29 +410,42 @@ async function validarLote(
 /**
  * Ingesta el histórico de estaciones para una fecha específica.
  *
+ * `soloHistorico` (relleno de días perdidos / migraciones): escribe
+ * ÚNICAMENTE `precios_historico`. No toca `precios` (la fecha antigua
+ * envenenaría los precios actuales) ni `estaciones` (sobrescribiría
+ * `fecha_actualizacion` con una fecha vieja y la web marcaría las estaciones
+ * como obsoletas).
+ *
  * @param db - Instancia de Drizzle ORM
  * @param fecha - Fecha en formato "dd-MM-yyyy"
  * @returns Número de estaciones procesadas
  */
 export async function ingestHistorico(
   db: LibSQLDatabase<typeof schema>,
-  fecha: string
+  fecha: string,
+  soloHistorico = false
 ): Promise<number> {
   console.log(`[ingest] Obteniendo histórico para ${fecha}...`);
 
   const response = await fetchHistorico(fecha);
-  const fechaObservacion = fecha;
+  // La API responde con su propia fecha ("dd/MM/yyyy H:mm:ss" o "dd/MM/yyyy").
+  // Hay que normalizarla a ISO: si se guardara el argumento tal cual, las
+  // filas de precios_historico quedarían con fechas no ISO y la retención
+  // (comparación de texto) las purgaría por error.
+  const fechaObservacion = normalizarFechaIso(response.Fecha) || fecha;
 
   console.log(
     `[ingest] Histórico ${fecha}: ${response.ListaEESSPrecio.length} estaciones`
   );
 
-  // Normalizar y upsert estaciones en lote (mismos helpers que ingestEstaciones)
+  // Normalizar (mismos helpers que ingestEstaciones)
   const estaciones = response.ListaEESSPrecio
     .map((raw) => normalizarEstacion(raw, response.Fecha))
     .filter((e): e is EstacionNormalizada => e !== null);
 
-  await upsertEstacionesLote(db, estaciones);
+  if (!soloHistorico) {
+    await upsertEstacionesLote(db, estaciones);
+  }
 
   const rawPorId = new Map(
     response.ListaEESSPrecio.map((r) => [r.IDEESS, r] as [string, MitecoEstacionRaw])
@@ -381,7 +454,7 @@ export async function ingestHistorico(
     extraerPrecios(rawPorId.get(e.id) as MitecoEstacionRaw, fechaObservacion)
   );
   const { validos } = await validarLote(db, preciosBrutos, fechaObservacion);
-  await upsertPreciosLote(db, validos);
+  await upsertPreciosLote(db, validos, soloHistorico);
 
   console.log(
     `[ingest] Histórico completado: ${estaciones.length} estaciones`

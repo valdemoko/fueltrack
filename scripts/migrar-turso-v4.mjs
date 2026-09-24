@@ -54,6 +54,7 @@ const RETENCION_DIAS_GEO = 35;
 const HOSTS_PROHIBIDOS = [
   "fueltrack-valdemokoo.aws-eu-west-1.turso.io",
   "combustible-webssssss.aws-eu-west-1.turso.io",
+  "gasofa-proyectoss.aws-eu-west-1.turso.io",
 ];
 
 const TURSO_URL = process.env.TURSO_DATABASE_URL;

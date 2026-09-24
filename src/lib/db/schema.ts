@@ -179,6 +179,40 @@ export const histGeoDia = sqliteTable(
   })
 );
 
+// ─── Tabla: Agregados SEMANALES geográficos PERMANENTES ────────────────────
+
+/**
+ * Precio medio semanal por ámbito geográfico y producto.
+ *
+ * Puente entre la ventana diaria (últimos 30 días) y las medias mensuales:
+ * las gráficas de 1-6 meses usan estos puntos semanales (~13-26 puntos) en
+ * lugar de 1-6 puntos mensuales. Se recalcula el bucket de la semana en curso
+ * una vez al día (idempotente); las semanas cerradas ya no se tocan.
+ * ambito: 'mun' | 'prov' | 'ccaa' (el nacional usa hist_nac_dia, diario y
+ * permanente, que ya da mejor resolución y no necesita esta tabla).
+ */
+export const histGeoSemana = sqliteTable(
+  "hist_geo_semana",
+  {
+    /** Tipo de ámbito: mun | prov | ccaa */
+    ambito: text("ambito").notNull(),
+    /** ID del municipio/provincia/ccaa */
+    geoId: text("geo_id").notNull(),
+    productoId: integer("producto_id").notNull(),
+    /** Lunes de la semana (ISO yyyy-MM-dd) */
+    semana: text("semana").notNull(),
+    /** Precio medio de la semana */
+    precioMedio: real("precio_medio").notNull(),
+    /** Máximo de estaciones con precio en la semana */
+    nEstaciones: integer("n_estaciones").notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({
+      columns: [table.ambito, table.geoId, table.productoId, table.semana],
+    }),
+  })
+);
+
 // ─── Tablas: Agregados mensuales PERMANENTES ───────────────────────────────
 
 /** Precio medio mensual por municipio y producto (~272k filas total). */

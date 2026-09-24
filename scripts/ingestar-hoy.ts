@@ -31,6 +31,8 @@ cargarEnvLocal();
 const HOSTS_PROHIBIDOS = [
   "fueltrack-valdemokoo.aws-eu-west-1.turso.io",
   "combustible-webssssss.aws-eu-west-1.turso.io",
+  "gasofa-proyectoss.aws-eu-west-1.turso.io",
+  "combustible-final.aws-eu-west-1.turso.io",
 ];
 
 const URL_BD = process.env.TURSO_DATABASE_URL;

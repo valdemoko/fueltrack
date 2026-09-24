@@ -12,8 +12,9 @@ import * as schema from "./schema";
 import {
   cacheada,
   REVALIDATE_PRECIOS,
-  REVALIDATE_HISTORICO,
+  REVALIDATE_INFINITO,
   TAG_PRECIOS,
+  TAG_HISTORICO,
 } from "./cache";
 
 /** SELECT genérico tipado contra el driver async (equivale al antiguo db.all síncrono). */
@@ -403,11 +404,15 @@ export async function getResumenHistoricoEstacion(
   productoId: number,
   dias = 30
 ): Promise<ResumenHistorico | null> {
+  // Datos históricos = inmutables → caché INDEFINIDA (REVALIDATE_INFINITO).
+  // La clave incluye el día porque la ventana se desplaza: así la entrada
+  // se genera como mucho UNA vez al día por estación+producto+rango.
+  const hoy = new Date().toISOString().slice(0, 10);
   return cacheada(
     () => resumenHistoricoEstacionInterna(estacionId, productoId, dias),
-    ["hist-est", estacionId, String(productoId), String(dias)],
-    REVALIDATE_HISTORICO,
-    [TAG_PRECIOS]
+    ["hist-est", estacionId, String(productoId), String(dias), hoy],
+    REVALIDATE_INFINITO,
+    [TAG_HISTORICO]
   );
 }
 

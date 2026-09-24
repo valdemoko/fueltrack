@@ -24,7 +24,13 @@ const DATABASE_AUTH_TOKEN =
 const FORCE_LOCAL = process.env.DB_LOCAL === "1";
 
 const isRemote = DATABASE_URL.startsWith("libsql://") || DATABASE_URL.startsWith("https://");
-const url = !FORCE_LOCAL && isRemote ? DATABASE_URL : "file:./data/combustible.db";
+/**
+ * Fichero SQLite local (desarrollo y pruebas). Se puede apuntar a otro
+ * fichero con LOCAL_DB=./data/otro.db — útil para validar mantenimiento
+ * sobre una COPIA sin tocar la base de datos de trabajo (y sin gastar cuota).
+ */
+const LOCAL_FILE = process.env.LOCAL_DB || "./data/combustible.db";
+const url = !FORCE_LOCAL && isRemote ? DATABASE_URL : `file:${LOCAL_FILE}`;
 
 export const isTurso = !FORCE_LOCAL && isRemote;
 
@@ -47,6 +53,9 @@ const client: Client = createClient({
 
 /** Instancia Drizzle del driver libSQL (async). */
 export const db = drizzle(client, { schema });
+
+/** URI efectiva en uso (sin credenciales), para logs de scripts y pruebas. */
+export const URL_EFECTIVA = isRemote && !FORCE_LOCAL ? DATABASE_URL : `file:${LOCAL_FILE}`;
 
 // ─── Envolturas async unificadas ───────────────────────────────────────────
 

@@ -17,10 +17,11 @@ import { db } from "@/lib/db";
 import {
   cacheada,
   REVALIDATE_PRECIOS,
-  REVALIDATE_HISTORICO,
+  REVALIDATE_INFINITO,
   REVALIDATE_ESTRUCTURA,
   TAG_PRECIOS,
   TAG_ESTRUCTURA,
+  TAG_HISTORICO,
 } from "./cache";
 import { slugify } from "@/lib/geografia";
 
@@ -378,15 +379,18 @@ export async function getHistoricoAmbito(
   dias: number,
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {}
 ): Promise<ResumenHistoricoAmbito | null> {
+  // Datos históricos = inmutables → caché INDEFINIDA. El día entra en la
+  // clave porque la ventana se desplaza a diario: cada consulta se genera
+  // como mucho UNA vez al día (y en ese día ya no vuelve a tocar la BD).
+  const hoy = new Date().toISOString().slice(0, 10);
   return cacheada(
     async () => {
-      const hoy = new Date().toISOString().slice(0, 10);
       const desde = new Date(Date.now() - dias * 86400000)
         .toISOString()
         .slice(0, 10);
 
-      // ── Serie diaria (hist_geo_dia) para ventanas ≤ 95 días ──
-      if (dias <= 95) {
+      // ── Serie diaria (hist_geo_dia) para ventanas ≤ 30 días ──
+      if (dias <= 30) {
         const { ambitoTipo, geoId } = resolverAmbito(ambito);
         const serie = (await db.all(sql`
           SELECT fecha, precio_medio AS precio, n_estaciones AS n
@@ -404,6 +408,34 @@ export async function getHistoricoAmbito(
           serie.map((s) => ({ fecha: s.fecha, precio: s.precio })),
           dias
         );
+      }
+
+      // ── Serie semanal (hist_geo_semana) para ventanas ≤ 190 días ──
+      // Puente entre el detalle diario (30 días) y las medias mensuales:
+      // 13-27 puntos en lugar de 1-6. El ámbito nacional tiene serie diaria
+      // permanente (hist_nac_dia), así que se salta esta rama.
+      if (dias <= 190) {
+        const { ambitoTipo, geoId } = resolverAmbito(ambito);
+        if (ambitoTipo !== "nac") {
+          const semana = (await db.all(sql`
+            SELECT semana AS fecha, precio_medio AS precio, n_estaciones AS n
+            FROM hist_geo_semana
+            WHERE ambito = ${ambitoTipo}
+              AND geo_id = ${geoId}
+              AND producto_id = ${productoId}
+              AND semana >= ${desde}
+              AND semana <= ${hoy}
+            ORDER BY semana ASC
+          `)) as unknown as Array<{ fecha: string; precio: number; n: number }>;
+
+          if (semana.length > 0) {
+            return resumenDesdeSerie(
+              semana.map((s) => ({ fecha: s.fecha, precio: s.precio })),
+              dias
+            );
+          }
+          // Sin datos semanales (p. ej. recién migrado): cae al mensual.
+        }
       }
 
       // ── Serie mensual (hist_*_mes) para ventanas largas ──
@@ -469,9 +501,10 @@ export async function getHistoricoAmbito(
       String(productoId),
       String(dias),
       ambito.municipioId ?? ambito.provinciaId ?? ambito.ccaaId ?? "es",
+      hoy,
     ],
-    REVALIDATE_HISTORICO,
-    [TAG_PRECIOS]
+    REVALIDATE_INFINITO,
+    [TAG_HISTORICO]
   );
 }
 
