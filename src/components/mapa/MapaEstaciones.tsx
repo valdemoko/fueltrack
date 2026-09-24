@@ -99,6 +99,46 @@ function AjustarVista({
   return null;
 }
 
+// ─── Parámetros de la petición de datos ───────────────────────────────────
+/**
+ * Construye la query de /api/mapa para un filtro y un encuadre del mapa.
+ * Es una función pura (recibe el mapa, no lo lee del estado) para poder
+ * comparar dos peticiones y evitar repetir la misma.
+ */
+function construirParams(
+  filtro: FiltroState,
+  mapa: L.Map | null
+): URLSearchParams {
+  const params = new URLSearchParams({
+    producto: String(filtro.productoId),
+  });
+  if (filtro.municipioId) {
+    params.set("municipioId", filtro.municipioId);
+  } else if (filtro.municipio) {
+    params.set("municipio", filtro.municipio);
+  } else if (mapa) {
+    // Sin filtro: pedir solo el viewport visible (bounding box) para no
+    // descargar las ~13k estaciones de España de una vez.
+    const b = mapa.getBounds();
+    if (b) {
+      // Cuantizar el bbox a la MISMA rejilla de 0,05° que aplica el
+      // backend: así viewports casi idénticos de distintos usuarios
+      // producen la misma URL y comparten caché CDN. Además, mover el mapa
+      // sin salir de la celda no cambia la URL, y la petición se puede
+      // saltar por completo (ver `ultimaClaveOkRef`).
+      const q = (v: number) => String(Math.round(v / 0.05) * 0.05);
+      params.set(
+        "bbox",
+        [q(b.getSouth()), q(b.getWest()), q(b.getNorth()), q(b.getEast())].join(
+          ","
+        )
+      );
+    }
+    params.set("limite", "2000");
+  }
+  return params;
+}
+
 // ─── Formatear fecha ISO → es-ES ──────────────────────────────────────────
 function formatearFecha(iso: string): string {
   const fecha = new Date(`${iso}T00:00:00`);
@@ -135,19 +175,37 @@ export function MapaEstaciones() {
   /** AbortController de la petición en curso: al cambiar filtros/viewport,
    *  la respuesta antigua se descarta en vez de machacar el estado. */
   const abortRef = useRef<AbortController | null>(null);
+  /** Última petición que TERMINÓ BIEN. Si la nueva pide exactamente lo mismo
+   *  (mismo producto, mismo filtro y mismo bbox cuantizado), no se vuelve a
+   *  pedir nada: ni red, ni consulta, ni spinner. Es el caso del arrastre
+   *  corto, que suele quedarse dentro de la misma celda de 0,05°. */
+  const ultimaClaveOkRef = useRef<string>("");
+  /** Debounce del movimiento del mapa. */
+  const esperaRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Recarga por movimiento del mapa SOLO en modo viewport (sin filtro de
    *  municipio: con filtro los datos no dependen del viewport y recargar
-   *  sería otro camino hacia el bucle infinito). */
+   *  sería otro camino hacia el bucle infinito).
+   *  Con debounce: dos arrastres seguidos generan UNA petición, no dos. */
   const handleViewport = useCallback(() => {
     const f = filtroRef.current;
-    if (!f.municipioId && !f.municipio) {
+    if (f.municipioId || f.municipio) return;
+    if (esperaRef.current) clearTimeout(esperaRef.current);
+    esperaRef.current = setTimeout(() => {
       setViewportVersion((v) => v + 1);
-    }
+    }, 250);
   }, []);
 
   // Fetch de datos del mapa
   const cargarDatos = useCallback(async () => {
+    const params = construirParams(filtro, mapRef.current);
+    const clave = params.toString();
+
+    // Nada nuevo que pedir: los datos en pantalla ya son los de esta clave.
+    // (Si la petición anterior falló, la clave no se marcó como buena y este
+    // atajo no se aplica, así que el botón "Reintentar" siempre reintenta.)
+    if (clave === ultimaClaveOkRef.current) return;
+
     // Cancelar la petición anterior si sigue en vuelo (evita respuestas
     // obsoletas pisando a las nuevas y estados de carga eternos)
     abortRef.current?.abort();
@@ -158,43 +216,14 @@ export function MapaEstaciones() {
     setError(null);
 
     try {
-      const params = new URLSearchParams({
-        producto: String(filtro.productoId),
-      });
-      if (filtro.municipioId) {
-        params.set("municipioId", filtro.municipioId);
-      } else if (filtro.municipio) {
-        params.set("municipio", filtro.municipio);
-      } else if (mapRef.current) {
-        // Sin filtro: pedir solo el viewport visible (bounding box) para no
-        // descargar las ~13k estaciones de España de una vez.
-        const b = mapRef.current.getBounds();
-        if (b) {
-          // Cuantizar el bbox a la MISMA rejilla de 0,05° que aplica el
-          // backend: así viewports casi idénticos de distintos usuarios
-          // producen la misma URL y comparten caché CDN.
-          const q = (v: number) =>
-            String(Math.round(v / 0.05) * 0.05);
-          params.set(
-            "bbox",
-            [
-              q(b.getSouth()),
-              q(b.getWest()),
-              q(b.getNorth()),
-              q(b.getEast()),
-            ].join(",")
-          );
-        }
-        params.set("limite", "2000");
-      }
-
-      const res = await fetch(`/api/mapa?${params.toString()}`, {
+      const res = await fetch(`/api/mapa?${clave}`, {
         signal: controller.signal,
       });
       if (!res.ok) throw new Error("Error al cargar datos");
 
       const json = await res.json();
       if (controller.signal.aborted) return;
+      ultimaClaveOkRef.current = clave;
       setData(json);
     } catch (err) {
       // Aborto esperado (nueva petición o desmontaje): no es un error real
@@ -210,9 +239,12 @@ export function MapaEstaciones() {
     void cargarDatos();
   }, [cargarDatos]);
 
-  // Al desmontar: cancelar cualquier petición en vuelo
+  // Al desmontar: cancelar cualquier petición en vuelo y el debounce pendiente
   useEffect(() => {
-    return () => abortRef.current?.abort();
+    return () => {
+      abortRef.current?.abort();
+      if (esperaRef.current) clearTimeout(esperaRef.current);
+    };
   }, []);
 
   // Rango de precios para colores
@@ -228,7 +260,8 @@ export function MapaEstaciones() {
 
       {/* Mapa */}
       <div className="flex-1 relative">
-        {cargando && (
+        {/* Carga INICIAL (aún no hay nada que enseñar): overlay completo. */}
+        {cargando && !data && (
           <div
             className="absolute inset-0 z-[1000] flex items-center justify-center bg-white/80"
             role="status"
@@ -243,6 +276,24 @@ export function MapaEstaciones() {
                 Cargando estaciones...
               </span>
             </div>
+          </div>
+        )}
+
+        {/* RECARGA del viewport: ya hay marcadores en pantalla, así que NO se
+            tapan. Antes cada arrastre ponía un velo blanco sobre todo el
+            mapa: el mapa desaparecía sin motivo aparente y parecía colgado.
+            Ahora se mantiene lo anterior y solo se avisa en una píldora. */}
+        {cargando && data && (
+          <div
+            className="absolute top-3 left-1/2 -translate-x-1/2 z-[1000] flex items-center gap-2 rounded-full bg-white/95 px-3.5 py-1.5 shadow-lg border border-stone-200"
+            role="status"
+            aria-live="polite"
+          >
+            <div
+              className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-amber-600 border-t-transparent"
+              aria-hidden="true"
+            />
+            <span className="text-xs text-stone-600">Actualizando…</span>
           </div>
         )}
 
@@ -287,10 +338,14 @@ export function MapaEstaciones() {
             clave={filtro.municipioId ?? filtro.municipio ?? ""}
           />
 
-          {/* Capa de teselas - OpenStreetMap */}
+          {/* Capa de teselas - OpenStreetMap.
+              `keepBuffer: 4` mantiene más teselas vecinas en memoria, así un
+              arrastre corto no descubre zonas en blanco mientras se piden
+              las nuevas. */}
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            keepBuffer={4}
           />
 
           {/* Estaciones con clustering (agrupación por zoom) */}

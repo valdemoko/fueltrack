@@ -36,18 +36,20 @@ import { slugify } from "@/lib/geografia";
 export async function getUltimasFechasProductos(): Promise<Record<number, string>> {
   return cacheada(
     async () => {
-      const productos = (await queryAll(
-        sql`SELECT id FROM productos WHERE EXISTS (
-          SELECT 1 FROM precios WHERE precios.producto_id = productos.id
-        )`
-      )) as unknown as Array<{ id: number }>;
+      // UNA consulta, no una por producto. Antes era un bucle con un
+      // `SELECT MAX(...) WHERE producto_id = ?` por producto: ~21 viajes de
+      // ida y vuelta a la base de datos (≈950 ms medidos) para devolver 21
+      // números. Con el GROUP BY se resuelve de una vez y el coste baja al de
+      // un único recorrido del índice por producto.
+      const filas = await queryAll<{ id: number; fecha: string }>(sql`
+        SELECT producto_id AS id, MAX(fecha_observacion) AS fecha
+        FROM precios
+        GROUP BY producto_id
+      `);
 
       const mapa: Record<number, string> = {};
-      for (const p of productos) {
-        const rows = (await queryAll(
-          sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${p.id}`
-        )) as unknown as Array<{ fecha: string }>;
-        if (rows[0]?.fecha) mapa[p.id] = rows[0].fecha;
+      for (const f of filas) {
+        if (f.fecha) mapa[Number(f.id)] = f.fecha;
       }
       return mapa;
     },
@@ -74,7 +76,19 @@ export interface CoberturaProducto {
  * Productos con cobertura real (≥ minEstaciones estaciones con precio) en un
  * ámbito geográfico, ordenados por número de estaciones descendente.
  * Si no se indica ámbito, calcula sobre toda la BD.
- * Coste: ≤43k filas actuales por producto; cacheado 15 min.
+ *
+ * ── POR QUÉ ESTÁ ESCRITA ASÍ ──────────────────────────────────────────────
+ *
+ * La versión anterior recorría los ~21 productos en JavaScript y lanzaba DOS
+ * consultas por producto (una para la fecha máxima y otra para el agregado):
+ * 42 viajes de ida y vuelta. Con la latencia del driver HTTP (~50 ms cada
+ * uno) eso eran ~2.000 ms medidos para pintar el selector de combustible, y
+ * era la causa de que cambiar de carburante pareciera colgado.
+ *
+ * Ahora son DOS consultas en total, con el agregado agrupado por producto.
+ * Devuelve exactamente lo mismo: la fecha sigue siendo la MÁXIMA NACIONAL del
+ * producto (no la del ámbito), que es lo que usa la página para detectar
+ * estaciones con datos atrasados.
  */
 export async function getCoberturaProductos(
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string } = {},
@@ -97,57 +111,56 @@ async function coberturaProductosInterna(
   ambito: { ccaaId?: string; provinciaId?: string; municipioId?: string },
   minEstaciones: number
 ): Promise<CoberturaProducto[]> {
-  const productos = (await queryAll(
-    sql`SELECT id, nombre, abreviatura FROM productos WHERE EXISTS (
-          SELECT 1 FROM precios WHERE precios.producto_id = productos.id
-        )`
-  )) as unknown as Array<{ id: number; nombre: string; abreviatura: string }>;
+  const filtroAmbito = ambito.municipioId
+    ? sql`AND e.municipio_id = ${ambito.municipioId}`
+    : ambito.provinciaId
+      ? sql`AND e.provincia_id = ${ambito.provinciaId}`
+      : ambito.ccaaId
+        ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
+        : sql``;
 
-  const resultado: CoberturaProducto[] = [];
+  // 1) Agregado del ámbito, agrupado por producto: 1 consulta.
+  //    El JOIN con `productos` sustituye al `WHERE EXISTS` de la versión
+  //    anterior: un producto sin precios simplemente no aparece en el grupo.
+  const stats = await queryAll<{
+    id: number;
+    nombre: string;
+    abreviatura: string;
+    con_precio: number;
+    precio_medio: number | null;
+  }>(sql`
+    SELECT p.id, p.nombre, p.abreviatura,
+           COUNT(DISTINCT pr.estacion_id)::int AS con_precio,
+           ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio
+    FROM precios pr
+    JOIN estaciones e ON e.id = pr.estacion_id
+    JOIN productos p ON p.id = pr.producto_id
+    WHERE pr.precio IS NOT NULL
+      ${filtroAmbito}
+    GROUP BY p.id, p.nombre, p.abreviatura
+  `);
 
-  for (const producto of productos) {
-    // Seek directo a la última fecha del producto (índice producto+fecha)
-    const fechaRow = (await queryGet(
-      sql`SELECT MAX(fecha_observacion) AS fecha FROM precios WHERE producto_id = ${producto.id}`
-    )) as unknown as { fecha: string } | undefined;
-    if (!fechaRow?.fecha) continue;
-    const fecha = fechaRow.fecha;
+  // 2) Última fecha de observación de cada producto, a NIVEL NACIONAL (no del
+  //    ámbito): es la referencia con la que la página marca las estaciones
+  //    cuyo último dato es anterior al parte más reciente del producto.
+  const fechas = await queryAll<{ id: number; fecha: string }>(sql`
+    SELECT producto_id AS id, MAX(fecha_observacion) AS fecha
+    FROM precios
+    GROUP BY producto_id
+  `);
+  const fechaPorProducto = new Map(fechas.map((f) => [Number(f.id), f.fecha]));
 
-    // Agregado del ámbito sobre precios ACTUALES (tabla pequeña)
-    const filtroAmbito = ambito.municipioId
-      ? sql`AND e.municipio_id = ${ambito.municipioId}`
-      : ambito.provinciaId
-        ? sql`AND e.provincia_id = ${ambito.provinciaId}`
-        : ambito.ccaaId
-          ? sql`AND e.ccaa_id = ${ambito.ccaaId}`
-          : sql``;
-
-    const stats = (await queryGet(sql`
-      SELECT COUNT(DISTINCT pr.estacion_id)::int AS con_precio,
-             ROUND(AVG(pr.precio)::numeric, 4)::float8 AS precio_medio
-      FROM precios pr
-      JOIN estaciones e ON e.id = pr.estacion_id
-      WHERE pr.producto_id = ${producto.id}
-        AND pr.precio IS NOT NULL
-        ${filtroAmbito}
-    `)) as unknown as { con_precio: number; precio_medio: number | null } | undefined;
-
-    if (!stats) continue;
-    const conPrecio = Number(stats.con_precio);
-    if (conPrecio < minEstaciones) continue;
-
-    resultado.push({
-      productoId: producto.id,
-      nombre: producto.nombre,
-      abreviatura: producto.abreviatura,
-      estacionesConPrecio: conPrecio,
-      precioMedio: stats.precio_medio,
-      fecha,
-    });
-  }
-
-  resultado.sort((a, b) => b.estacionesConPrecio - a.estacionesConPrecio);
-  return resultado;
+  return stats
+    .filter((s) => Number(s.con_precio) >= minEstaciones)
+    .map((s) => ({
+      productoId: s.id,
+      nombre: s.nombre,
+      abreviatura: s.abreviatura,
+      estacionesConPrecio: Number(s.con_precio),
+      precioMedio: s.precio_medio,
+      fecha: fechaPorProducto.get(s.id) ?? null,
+    }))
+    .sort((a, b) => b.estacionesConPrecio - a.estacionesConPrecio);
 }
 
 // ─── Estaciones de un municipio por producto ────────────────────────────────

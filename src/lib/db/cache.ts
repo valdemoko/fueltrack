@@ -13,13 +13,25 @@
  *  - Los datos estructurales (geografía, cobertura) casi nunca cambian: TTL
  *    semanal + tag "estructura" (solo se invalida si algún día se ingesta
  *    el catálogo de estaciones a mano).
- *  - En desarrollo (BD local file:) no se cachea: las consultas son <50 ms.
+ *  - Fuera del runtime de Next (scripts CLI con tsx) no se cachea: no hay
+ *    Data Cache y `unstable_cache` lanzaría. Esos scripts quieren el dato
+ *    fresco, así que se llama a la función directamente.
  *
- * Todos los wrappers son no-op seguros si React no está disponible
- * (scripts CLI fuera de request): devuelven la función tal cual.
+ * ── OJO AL CAMBIAR EL GUARD ──────────────────────────────────────────────
+ *
+ * Este fichero YA se rompió una vez de forma silenciosa. El guard era
+ * `if (!isTurso) return fn()`, y al migrar de Turso a Neon `isTurso` quedó
+ * fijo en `false`: la caché dejó de aplicarse en producción SIN NINGÚN ERROR,
+ * y cada visita pasó a consultar la base de datos entera. Se notó porque una
+ * página tardaba ~2,4 s y no mejoraba al recargar.
+ *
+ * El guard correcto es positivo y doble: hay que estar en Postgres remoto
+ * (`isPostgres`) Y dentro del runtime de Next (`NEXT_RUNTIME`). Si algún día
+ * se toca, comprobar que una segunda petición a la misma página es MÁS RÁPIDA
+ * que la primera; si tarda lo mismo, la caché se ha vuelto a desactivar.
  */
 import { unstable_cache } from "next/cache";
-import { isTurso } from "./index";
+import { isPostgres } from "./index";
 
 /**
  * TTL de seguridad para datos derivados de precios (resúmenes, series,
@@ -69,10 +81,10 @@ export function cacheada<T>(
   tags: string[] = []
 ): Promise<T> {
   if (process.env.DB_NO_CACHE === "1") return fn();
-  // BD local (file:): las consultas son <50 ms y el dato cambia a diario;
-  // unstable_cache solo aporta en producción con Turso remoto (y en local
-  // interfiere con el driver nativo en `next start`).
-  if (!isTurso) return fn();
+  // Sin base de datos remota no hay cuota que proteger.
+  if (!isPostgres) return fn();
+  // Fuera de Next (scripts tsx, migraciones) no existe la Data Cache.
+  if (!process.env.NEXT_RUNTIME) return fn();
   const memo = unstable_cache(fn, ["fueltrack", ...clave], {
     revalidate: revalidateSegundos,
     tags: ["fueltrack", ...tags],

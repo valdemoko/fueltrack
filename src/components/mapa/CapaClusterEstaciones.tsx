@@ -1,10 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useMap } from "react-leaflet";
+import { useRouter } from "next/navigation";
 import L from "leaflet";
-import Link from "next/link";
-import { createRoot, type Root } from "react-dom/client";
 import "leaflet.markercluster";
 import "leaflet.markercluster/dist/MarkerCluster.css";
 import "leaflet.markercluster/dist/MarkerCluster.Default.css";
@@ -39,11 +38,24 @@ function getColor(precio: number | null, min: number, max: number): string {
   return "#dc2626"; // red-600 (caro)
 }
 
-// ─── Icono personalizado ──────────────────────────────────────────────────
-function createIcon(color: string): L.DivIcon {
-  return L.divIcon({
-    className: "custom-marker",
-    html: `
+// ─── Iconos: CINCO instancias para miles de marcadores ────────────────────
+/**
+ * Antes se llamaba a `createIcon(color)` por CADA marcador, lo que construía
+ * hasta 2.000 objetos DivIcon idénticos (mismo HTML de 12 líneas, mismos
+ * tamaños) por recarga. Solo existen 5 colores posibles, así que se crean una
+ * vez y se comparten: Leaflet clona el nodo por marcador internamente, así
+ * que reutilizar la instancia es exactamente lo que el plugin espera y no
+ * mezcla iconos entre marcadores. Se ahorra todo el trabajo de parseo de ese
+ * HTML en cada refresco del viewport.
+ */
+const ICONOS = new Map<string, L.DivIcon>();
+
+function getIcon(color: string): L.DivIcon {
+  let icono = ICONOS.get(color);
+  if (!icono) {
+    icono = L.divIcon({
+      className: "custom-marker",
+      html: `
       <div style="
         width: 24px;
         height: 24px;
@@ -65,63 +77,80 @@ function createIcon(color: string): L.DivIcon {
         "></div>
       </div>
     `,
-    iconSize: [24, 24],
-    iconAnchor: [12, 24],
-    popupAnchor: [0, -24],
-  });
+      iconSize: [24, 24],
+      iconAnchor: [12, 24],
+      popupAnchor: [0, -24],
+    });
+    ICONOS.set(color, icono);
+  }
+  return icono;
 }
 
-// ─── Contenido del popup (React) ──────────────────────────────────────────
-function PopupContenido({
-  estacion,
-  color,
-}: {
-  estacion: EstacionMapa;
-  color: string;
-}) {
-  return (
-    <div className="min-w-[200px]">
-      <h3 className="font-bold text-gray-900">
-        {estacion.rotulo || "Estación sin nombre"}
-      </h3>
+// ─── Contenido del popup (HTML plano, construido al abrirlo) ───────────────
+/** Escapa el texto que viene de la fuente oficial antes de insertarlo como HTML. */
+function escapar(texto: string): string {
+  return texto
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
-      <p className="text-sm text-gray-600 mt-1">{estacion.localidad}</p>
-
-      {estacion.precio !== null ? (
-        <div
-          className="mt-3 p-2 rounded-lg"
-          style={{ backgroundColor: `${color}20` }}
-        >
-          <div className="flex items-baseline gap-1">
-            <span className="text-2xl font-bold" style={{ color }}>
-              {estacion.precio.toFixed(3)}
-            </span>
-            <span className="text-sm text-gray-600">€/L</span>
-          </div>
+/**
+ * HTML del popup de una estación.
+ *
+ * ── Por qué HTML y ya no un componente React ─────────────────────────────
+ *
+ * Antes cada marcador creaba su propio root de React (`createRoot` + `render`)
+ * al vuelo, aunque el usuario no abriese ni un popup: con 2.000 estaciones eso
+ * eran 2.000 raíces de React y 2.000 renders por cada refresco del viewport.
+ * Era, con diferencia, el mayor consumidor de CPU del mapa.
+ *
+ * Ahora el HTML se construye SOLO cuando se abre el popup (microsegundos, una
+ * vez por estación y sesión). Los enlaces siguen navegando dentro de la SPA:
+ * CapaClusterEstaciones intercepta el clic en `a[data-nav]` y usa el router de
+ * Next, así que no se pierde la navegación de cliente que daba <Link>.
+ */
+function popupHtml(estacion: EstacionMapa, color: string): string {
+  const precio =
+    estacion.precio !== null
+      ? `
+      <div class="mt-3 p-2 rounded-lg" style="background-color: ${color}20">
+        <div class="flex items-baseline gap-1">
+          <span class="text-2xl font-bold" style="color: ${color}">${estacion.precio.toFixed(
+            3
+          )}</span>
+          <span class="text-sm text-gray-600">€/L</span>
         </div>
-      ) : (
-        <div className="mt-3 p-2 bg-gray-100 rounded-lg">
-          <span className="text-sm text-gray-500">
-            Precio no disponible
-          </span>
-        </div>
-      )}
+      </div>`
+      : `
+      <div class="mt-3 p-2 bg-gray-100 rounded-lg">
+        <span class="text-sm text-gray-500">Precio no disponible</span>
+      </div>`;
 
-      <Link
-        href={`/estacion/${estacion.id}`}
-        className="mt-3 block text-center text-sm text-amber-600 hover:text-amber-700 font-medium"
-      >
+  return `
+    <div class="min-w-[200px]">
+      <h3 class="font-bold text-gray-900">${escapar(
+        estacion.rotulo || "Estación sin nombre"
+      )}</h3>
+      <p class="text-sm text-gray-600 mt-1">${escapar(estacion.localidad)}</p>
+      ${precio}
+      <a href="/estacion/${encodeURIComponent(estacion.id)}" data-nav
+         class="mt-3 block text-center text-sm text-amber-600 hover:text-amber-700 font-medium">
         Ver detalles →
-      </Link>
+      </a>
     </div>
-  );
+  `;
 }
 
 // ─── Capa de clustering ───────────────────────────────────────────────────
 /**
  * Renderiza las estaciones con leaflet.markercluster (agrupación por zoom).
- * Los popups se renderizan con React imperativamente (react-leaflet no
- * soporta markers dentro de un markerClusterGroup).
+ *
+ * El contenido de cada popup se genera de forma perezosa al abrirlo y la
+ * navegación al detalle se delega en un único listener sobre el contenedor del
+ * mapa (no uno por marcador).
  */
 export function CapaClusterEstaciones({
   estaciones,
@@ -129,40 +158,46 @@ export function CapaClusterEstaciones({
   precioMax,
 }: CapaClusterEstacionesProps) {
   const map = useMap();
+  const router = useRouter();
   const grupoRef = useRef<L.MarkerClusterGroup | null>(null);
-  const rootsRef = useRef<Root[]>([]);
 
-  /** Desmonta los roots de React de los popups FUERA del ciclo de render.
-   *  React 18+ prohíbe llamar a root.unmount() sincrónicamente mientras
-   *  React está renderizando (limpieza de effects durante un render
-   *  concurrente); diferirlo con setTimeout evita el error
-   *  "Attempted to synchronously unmount a root while React was already
-   *  rendering". Los roots ya están fuera del DOM (la capa se elimina
-   *  antes), así que desmontarlos en el siguiente tick es seguro. */
-  const desmontarRoots = useCallback((roots: Root[]) => {
-    if (roots.length === 0) return;
-    window.setTimeout(() => {
-      for (const r of roots) {
-        try {
-          r.unmount();
-        } catch {
-          // Root ya desmontado: ignorar
-        }
-      }
-    }, 0);
-  }, []);
+  /**
+   * Navegación delegada: un solo listener para los ~2.000 popups.
+   * Respeta los modificadores (Ctrl/Cmd/Shift) para que "abrir en pestaña
+   * nueva" siga funcionando como un enlace normal. Si el clic no llega aquí
+   * (por ejemplo si Leaflet lo detuviera), el `<a>` hace su navegación
+   * habitual: el peor caso es una recarga completa, nunca un enlace muerto.
+   */
+  useEffect(() => {
+    const contenedor = map.getContainer();
+    const alPulsar = (ev: MouseEvent) => {
+      if (ev.defaultPrevented || ev.button !== 0) return;
+      if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+      const enlace = (ev.target as HTMLElement | null)?.closest?.(
+        "a[data-nav]"
+      ) as HTMLAnchorElement | null;
+      if (!enlace) return;
+      const href = enlace.getAttribute("href");
+      if (!href) return;
+      ev.preventDefault();
+      router.push(href);
+    };
+    contenedor.addEventListener("click", alPulsar);
+    return () => contenedor.removeEventListener("click", alPulsar);
+  }, [map, router]);
+
+  const limpiar = useCallback(() => {
+    if (grupoRef.current) {
+      grupoRef.current.clearLayers();
+      map.removeLayer(grupoRef.current);
+      grupoRef.current = null;
+    }
+  }, [map]);
 
   useEffect(() => {
     if (!map || estaciones.length === 0) return;
 
-    // Limpiar capa anterior (los roots se desmontan diferidos, fuera del render)
-    if (grupoRef.current) {
-      map.removeLayer(grupoRef.current);
-      grupoRef.current.clearLayers();
-    }
-    const rootsAnteriores = rootsRef.current;
-    rootsRef.current = [];
-    desmontarRoots(rootsAnteriores);
+    limpiar();
 
     const grupo = L.markerClusterGroup({
       chunkedLoading: true,
@@ -174,48 +209,37 @@ export function CapaClusterEstaciones({
       removeOutsideVisibleBounds: true,
     });
 
+    // Se crea el array de marcadores de una vez y se añade con addLayers: el
+    // plugin lo trocea con `chunkedLoading`, en lugar de que el bucle bloquee
+    // el hilo principal marcador a marcador.
+    const marcadores: L.Marker[] = [];
+
     for (const estacion of estaciones) {
       const color = getColor(estacion.precio, precioMin, precioMax);
       const marcador = L.marker([estacion.latitud, estacion.longitud], {
-        icon: createIcon(color),
+        icon: getIcon(color),
         title: estacion.rotulo || estacion.localidad,
       });
 
-      // Renderizar popup con React
-      const contenedor = document.createElement("div");
-      const root = createRoot(contenedor);
-      root.render(<PopupContenido estacion={estacion} color={color} />);
-      rootsRef.current.push(root);
-
-      marcador.bindPopup(contenedor, {
+      // Placeholder vacío: el HTML real se genera al abrir (ver popupHtml).
+      marcador.bindPopup("", {
         maxWidth: 280,
         minWidth: 220,
         autoPanPadding: [40, 40],
       });
+      marcador.on("popupopen", () => {
+        marcador.setPopupContent(popupHtml(estacion, color));
+      });
 
-      grupo.addLayer(marcador);
+      marcadores.push(marcador);
     }
 
+    grupo.addLayers(marcadores);
     map.addLayer(grupo);
     grupoRef.current = grupo;
 
-    return () => {
-      if (grupoRef.current) {
-        map.removeLayer(grupoRef.current);
-        grupoRef.current.clearLayers();
-        grupoRef.current = null;
-      }
-      // Desmontar los roots de los popups diferidamente: la limpieza del
-      // effect puede ejecutarse mientras React está renderizando (render
-      // concurrente), y un unmount sincrónico ahí provoca el error
-      // "Attempted to synchronously unmount a root while React was already
-      // rendering". Los roots ya no están en el DOM, así que diferirlo es
-      // seguro.
-      const roots = rootsRef.current;
-      rootsRef.current = [];
-      desmontarRoots(roots);
-    };
-  }, [map, estaciones, precioMin, precioMax, desmontarRoots]);
+    return limpiar;
+  }, [map, estaciones, precioMin, precioMax, limpiar]);
 
   return null;
 }

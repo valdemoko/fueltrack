@@ -67,11 +67,18 @@ export type DB = typeof db;
 
 /** ¿Estamos configurados contra Postgres? (diagnóstico de scripts y healthcheck) */
 export const isPostgres = /^postgres(ql)?:\/\//.test(DATABASE_URL);
-/** Nombre heredado del motor anterior; se mantiene para no romper imports. */
-export const isTurso = false;
 
 /** ¿Hay una URL configurada? (diagnóstico: distinguir "falta config" de "la BD falla") */
 export const hayUrl = DATABASE_URL.length > 0;
+
+/*
+ * NOTA: aquí vivía `export const isTurso` (el nombre del motor anterior). Se ha
+ * eliminado, y no por limpieza: `cache.ts` lo usaba como guard
+ * (`if (!isTurso) return fn()`) y al quedar fijo en `false` desactivó la caché
+ * de datos ENTERA en producción sin lanzar ningún error. Una constante que
+ * siempre vale lo mismo pero se lee como una comprobación es una trampa: es
+ * mejor que el compilador avise de que el nombre ya no existe.
+ */
 
 // ─── Envolturas async unificadas ────────────────────────────────────────────
 
