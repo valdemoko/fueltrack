@@ -66,13 +66,14 @@ export default function PoliticaCookiesPage() {
               </tr>
               <tr>
                 <td className="border border-stone-200 px-4 py-2">
-                  cookie_consent
+                  Cookies del sistema de privacidad de Google (Privacy &amp;
+                  Messaging)
                 </td>
                 <td className="border border-stone-200 px-4 py-2">
-                  Recordar la preferencia de cookies del usuario
+                  Registrar tu decisión de consentimiento y respetarla
                 </td>
                 <td className="border border-stone-200 px-4 py-2">
-                  1 año
+                  Hasta 13 meses
                 </td>
               </tr>
             </tbody>
@@ -204,15 +205,16 @@ export default function PoliticaCookiesPage() {
 
           <h2>Consentimiento</h2>
           <p>
-            Al hacer clic en &quot;Aceptar&quot; en nuestro banner de cookies,
-            usted consiente el uso de las cookies de análisis y publicidad. Las
-            cookies técnicas se utilizan sin necesidad de consentimiento ya que
-            son imprescindibles para el funcionamiento del sitio.
+            El consentimiento se gestiona mediante el sistema de privacidad y
+            mensajes de Google (Privacy &amp; Messaging), cuyo mensaje aparece
+            a los usuarios del EEE, Reino Unido y Suiza. Puedes aceptar,
+            rechazar o personalizar desde el propio mensaje de Google.
           </p>
           <p>
-            Puede retirar su consentimiento en cualquier momento modificando la
-            configuración de cookies desde el botón &quot;Configurar cookies&quot;
-            que encontrará en el pie de página.
+            Puedes retirar o modificar tu consentimiento en cualquier momento:
+            mediante el icono de privacidad de Google que aparece en pantalla
+            cuando el mensaje está activo, o borrando las cookies de este sitio
+            en tu navegador y recargando la página.
           </p>
 
           <h2>Cambios en esta política</h2>

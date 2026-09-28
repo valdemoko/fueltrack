@@ -1,0 +1,87 @@
+{
+  "esquema_creado": true,
+  "datos": true,
+  "indices_creados": true,
+  "tablas": {
+    "ccaa": {
+      "fila": 19,
+      "escritas": 19,
+      "completada": true
+    },
+    "provincias": {
+      "fila": 52,
+      "escritas": 52,
+      "completada": true
+    },
+    "municipios": {
+      "fila": 3539,
+      "escritas": 3539,
+      "completada": true
+    },
+    "productos": {
+      "fila": 30,
+      "escritas": 30,
+      "completada": true
+    },
+    "estaciones": {
+      "fila": 13130,
+      "escritas": 13130,
+      "completada": true
+    },
+    "precios": {
+      "fila": 46794,
+      "escritas": 46794,
+      "completada": true
+    },
+    "precios_historico": {
+      "fila": 1067506,
+      "escritas": 1067506,
+      "completada": true
+    },
+    "hist_geo_dia": {
+      "fila": 395240,
+      "escritas": 395240,
+      "completada": true
+    },
+    "hist_nac_dia": {
+      "fila": 13235,
+      "escritas": 13235,
+      "completada": true
+    },
+    "hist_mun_mes": {
+      "fila": 385059,
+      "escritas": 385059,
+      "completada": true
+    },
+    "hist_prov_mes": {
+      "fila": 14216,
+      "escritas": 14216,
+      "completada": true
+    },
+    "hist_ccaa_mes": {
+      "fila": 5539,
+      "escritas": 5539,
+      "completada": true
+    },
+    "hist_estacion_mes": {
+      "fila": 856437,
+      "escritas": 856437,
+      "completada": true
+    },
+    "hist_meses_procesados": {
+      "fila": 0,
+      "escritas": 0,
+      "completada": true
+    },
+    "resumen_nacional": {
+      "fila": 21,
+      "escritas": 21,
+      "completada": true
+    },
+    "cron_progreso": {
+      "fila": 1,
+      "escritas": 1,
+      "completada": true
+    }
+  }
+}

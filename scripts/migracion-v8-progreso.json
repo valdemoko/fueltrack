@@ -1,0 +1,69 @@
+{
+  "tablas": {
+    "ccaa": {
+      "completada": true,
+      "filas": 19
+    },
+    "provincias": {
+      "completada": true,
+      "filas": 52
+    },
+    "municipios": {
+      "completada": true,
+      "filas": 3539
+    },
+    "productos": {
+      "completada": true,
+      "filas": 30
+    },
+    "estaciones": {
+      "completada": true,
+      "filas": 13135
+    },
+    "precios": {
+      "completada": true,
+      "filas": 46673
+    },
+    "precios_historico": {
+      "ultimoRowid": 1578093,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_geo_dia": {
+      "ultimoRowid": 1234572,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_geo_semana": {
+      "ultimoRowid": 22561,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_nac_dia": {
+      "ultimoRowid": 13233,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_mun_mes": {
+      "ultimoRowid": 385059,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_prov_mes": {
+      "ultimoRowid": 14216,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_ccaa_mes": {
+      "ultimoRowid": 5539,
+      "filas": 0,
+      "completada": true
+    },
+    "hist_estacion_mes": {
+      "ultimoRowid": 500800,
+      "filas": 500800
+    }
+  },
+  "indices_creados": false,
+  "escritas": 2499682
+}

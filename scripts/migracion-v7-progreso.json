@@ -1,0 +1,100 @@
+{
+  "esquema_creado": true,
+  "indices_creados": true,
+  "tablas": {
+    "ccaa": {
+      "ultimoRowid": 19,
+      "filas": 19,
+      "total": 19,
+      "completada": true
+    },
+    "provincias": {
+      "ultimoRowid": 52,
+      "filas": 52,
+      "total": 52,
+      "completada": true
+    },
+    "municipios": {
+      "ultimoRowid": 3539,
+      "filas": 3539,
+      "total": 3539,
+      "completada": true
+    },
+    "productos": {
+      "ultimoRowid": 32,
+      "filas": 30,
+      "total": 30,
+      "completada": true
+    },
+    "estaciones": {
+      "ultimoRowid": 13135,
+      "filas": 13135,
+      "total": 13135,
+      "completada": true
+    },
+    "precios": {
+      "ultimoRowid": 46673,
+      "filas": 46673,
+      "total": 46673,
+      "completada": true
+    },
+    "precios_historico": {
+      "ultimoRowid": 1578093,
+      "filas": 1142353,
+      "total": 1142353,
+      "completada": true
+    },
+    "hist_geo_dia": {
+      "ultimoRowid": 1234572,
+      "filas": 352473,
+      "total": 352473,
+      "completada": true
+    },
+    "hist_nac_dia": {
+      "ultimoRowid": 13233,
+      "filas": 13233,
+      "total": 13233,
+      "completada": true
+    },
+    "hist_mun_mes": {
+      "ultimoRowid": 385059,
+      "filas": 385059,
+      "total": 385059,
+      "completada": true
+    },
+    "hist_prov_mes": {
+      "ultimoRowid": 14216,
+      "filas": 14216,
+      "total": 14216,
+      "completada": true
+    },
+    "hist_ccaa_mes": {
+      "ultimoRowid": 5539,
+      "filas": 5539,
+      "total": 5539,
+      "completada": true
+    },
+    "hist_estacion_mes": {
+      "ultimoRowid": 856437,
+      "filas": 856437,
+      "total": 856437,
+      "completada": true
+    },
+    "hist_meses_procesados": {
+      "completada": true,
+      "filas": 0
+    },
+    "resumen_nacional": {
+      "ultimoRowid": 32,
+      "filas": 21,
+      "total": 21,
+      "completada": true
+    },
+    "hist_geo_semana": {
+      "ultimoRowid": 22561,
+      "filas": 22561,
+      "total": 22561,
+      "completada": true
+    }
+  }
+}

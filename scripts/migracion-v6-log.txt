@@ -1,0 +1,43 @@
+ORIGEN : libsql://combustible-final.aws-eu-west-1.turso.io (solo lectura)
+DESTINO: libsql://fuel-bosses.aws-eu-west-1.turso.io
+
+Creando 16 tablas (SIN índices secundarios)...
+✔ Tablas creadas.
+✔ ccaa: 19 filas
+✔ provincias: 52 filas
+✔ municipios: 3539 filas
+✔ productos: 30 filas
+✔ estaciones: 13130 filas
+✔ precios: 46794 filas
+✔ precios_historico: 1067506 filas
+✔ hist_geo_dia: 395240 filas
+✔ hist_nac_dia: 13235 filas
+✔ hist_mun_mes: 385059 filas
+✔ hist_prov_mes: 14216 filas
+✔ hist_ccaa_mes: 5539 filas
+✔ hist_estacion_mes: 856437 filas
+✔ hist_meses_procesados: 0 filas
+✔ resumen_nacional: 21 filas
+✔ cron_progreso: 1 filas
+Creando 11 índices sobre datos ya cargados (cuesta LECTURAS, no escrituras)...
+✔ Índices creados.
+
+== VERIFICACIÓN ==
+  ccaa                   destino=       19 origen=       19 ✔
+  provincias             destino=       52 origen=       52 ✔
+  municipios             destino=     3539 origen=     3539 ✔
+  productos              destino=       30 origen=       30 ✔
+  estaciones             destino=    13130 origen=    13130 ✔
+  precios                destino=    46794 origen=    46794 ✔
+  precios_historico      destino=  1067506 origen=  1067506 ✔
+  hist_geo_dia           destino=   395240 origen=   395240 ✔
+  hist_nac_dia           destino=    13235 origen=    13235 ✔
+  hist_mun_mes           destino=   385059 origen=   385059 ✔
+  hist_prov_mes          destino=    14216 origen=    14216 ✔
+  hist_ccaa_mes          destino=     5539 origen=     5539 ✔
+  hist_estacion_mes      destino=   856437 origen=   856437 ✔
+  hist_meses_procesados  destino=        0 origen=        0 ✔
+  resumen_nacional       destino=       21 origen=       21 ✔
+  cron_progreso          destino=        1 origen=        1 ✔
+
+✔ MIGRACIÓN V6 COMPLETADA Y VERIFICADA

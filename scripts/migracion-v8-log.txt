@@ -1,0 +1,39 @@
+ORIGEN : fichero local ./data/combustible.db (0 cuota de lecturas)
+DESTINO: libsql://gunissss-asdasdasdasda.aws-eu-west-1.turso.io
+OPCIONES: tablas=TODAS · presupuesto=3.000.000 filas · lote=400
+
+Esquema ya presente en el destino (no se recrea nada).
+= ccaa                   ya completo en el destino (19/19): 0 escrituras
+= provincias             ya completo en el destino (52/52): 0 escrituras
+= municipios             ya completo en el destino (3539/3539): 0 escrituras
+= productos              ya completo en el destino (30/30): 0 escrituras
+= estaciones             ya completo en el destino (13.135/13.135): 0 escrituras
+= precios                ya completo en el destino (46.673/46.673): 0 escrituras
+✔ precios_historico      785.153 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_geo_dia           352.473 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_geo_semana        22.561 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_nac_dia           13.233 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_mun_mes           385.059 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_prov_mes          14.216 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+✔ hist_ccaa_mes          5539 filas enviadas (OR IGNORE: solo se escriben las que faltaban)
+  ⏸ hist_estacion_mes: presupuesto agotado (500.800 intentos). Reanuda con el mismo comando.
+
+== VERIFICACIÓN (recuento y suma, origen vs destino) ==
+  ccaa                          19/       19 ✔
+  provincias                    52/       52 ✔
+  municipios                  3539/     3539 ✔
+  productos                     30/       30 ✔
+  estaciones                 13135/    13135 ✔
+  precios                    46673/    46673 ✔ Σ ori=86098.33 dst=86098.33
+  precios_historico        1142353/  1142353 ✔ Σ ori=2119743.06 dst=2119743.06
+  hist_geo_dia              352473/   352473 ✔ Σ ori=671766.41 dst=671766.41
+  hist_geo_semana            22561/    22561 ✔ Σ ori=44501.02 dst=44501.02
+  hist_nac_dia               13233/    13233 ✔ Σ ori=27588.65 dst=27588.65
+  hist_mun_mes              385059/   385059 ✔ Σ ori=570109.94 dst=570109.94
+  hist_prov_mes              14216/    14216 ✔ Σ ori=20669.5 dst=20669.5
+  hist_ccaa_mes               5539/     5539 ✔ Σ ori=8358.16 dst=8358.16
+  hist_estacion_mes         500800/   856437 ✗ faltan filas
+  hist_meses_procesados          0/        0 ✔
+  resumen_nacional               0/       21 ✗ faltan filas
+
+✗ Faltan filas o las sumas no cuadran: NO toques la app todavía.

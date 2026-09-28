@@ -45,12 +45,16 @@ export const ADSENSE_SLOT_CONTENIDO =
   process.env.NEXT_PUBLIC_ADSENSE_SLOT_CONTENIDO || "";
 
 /**
- * Clave de cliente CookieYes (CMP certificada por Google).
- * Se configura mediante NEXT_PUBLIC_COOKIEYES_CLIENT_KEY.
- * Vacío = solo banner propio de consentimiento básico.
+ * URL de la CMP oficial de Google (Privacy & Messaging), generada desde
+ * AdSense → Privacidad y mensajes → Reglamentos europeos.
+ * Se configura mediante NEXT_PUBLIC_GOOGLE_CMP_SRC con la etiqueta exacta.
+ * Vacío = no se carga ninguna CMP (no se sirven anuncios en el EEE).
  */
-export const COOKIEYES_CLIENT_KEY =
-  process.env.NEXT_PUBLIC_COOKIEYES_CLIENT_KEY || "";
+export const GOOGLE_CMP_SRC =
+  process.env.NEXT_PUBLIC_GOOGLE_CMP_SRC || "";
+
+/** Indica si la CMP de Google está configurada */
+export const googleCmpEnabled = GOOGLE_CMP_SRC.length > 0;
 
 /**
  * Token de verificación de Google Search Console (contenido del meta tag
@@ -62,6 +66,3 @@ export const GOOGLE_SITE_VERIFICATION =
 
 /** Indica si AdSense está configurado (publisher ID presente) */
 export const adsenseEnabled = ADSENSE_PUBLISHER_ID.length > 0;
-
-/** Indica si la CMP CookieYes está configurada */
-export const cookieYesEnabled = COOKIEYES_CLIENT_KEY.length > 0;

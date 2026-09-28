@@ -22,28 +22,12 @@ declare global {
 }
 
 function readAdConsent(): boolean {
-  try {
-    // 1) CookieYes expone el estado en el objeto global
-    const ckyConsent = (
-      window as unknown as {
-        cookieyes?: { consented?: { advertisement?: boolean } };
-      }
-    ).cookieyes;
-    if (ckyConsent?.consented) {
-      return ckyConsent.consented.advertisement === true;
-    }
-    // 2) Fallback: cookie propia de consentimiento (modo sin CMP)
-    const match = document.cookie.match(
-      /(?:^|; )cookie_consent=([^;]*)/
-    );
-    if (match) {
-      const state = JSON.parse(decodeURIComponent(match[1]));
-      return state.advertising === true;
-    }
-  } catch {
-    // cookie corrupta o acceso bloqueado → sin consentimiento
-  }
-  return false;
+  // Con Consent Mode, el consentimiento publicitario lo gestiona la CMP de
+  // Google (Privacy & Messaging): AdSense decide si sirve según las señales
+  // actualizadas (ad_storage/ad_personalization). El componente renderiza
+  // el emplazamiento siempre que AdSense esté configurado; sin consentimiento
+  // la CMP bloquea el anuncio sin intervención de este código.
+  return true;
 }
 
 // ─── Componente ────────────────────────────────────────────────────────────
@@ -65,19 +49,11 @@ export function BannerAd({
   const pushedRef = useRef(false);
   const [consent, setConsent] = useState(false);
 
-  // Comprobar consentimiento al montar y cuando CookieYes lo actualice
+  // Comprobar consentimiento al montar (la CMP de Google aplica el bloqueo
+  // real de anuncios; aquí solo controlamos que AdSense esté configurado)
   useEffect(() => {
     if (!adsenseEnabled || !slot) return;
-
-    const update = () => setConsent(readAdConsent());
-    update();
-
-    window.addEventListener("cookieyes_consent_update", update);
-    window.addEventListener("cookieyes_banner_load", update);
-    return () => {
-      window.removeEventListener("cookieyes_consent_update", update);
-      window.removeEventListener("cookieyes_banner_load", update);
-    };
+    setConsent(readAdConsent());
   }, [slot]);
 
   // Empujar el anuncio cuando hay consentimiento

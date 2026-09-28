@@ -1,0 +1,41 @@
+ORIGEN : libsql://gasofa-proyectoss.aws-eu-west-1.turso.io (SOLO LECTURA)
+DESTINO: libsql://combustible-final.aws-eu-west-1.turso.io
+
+Ejecutando 27 sentencias DDL en BD nueva...
+✔ Esquema creado (idéntico al origen).
+✔ ccaa: 19 filas subidas
+✔ provincias: 52 filas subidas
+✔ municipios: 3539 filas subidas
+✔ productos: 30 filas subidas
+✔ estaciones: 13130 filas subidas
+✔ precios: 46792 filas subidas
+✔ precios_historico: 1054000 filas subidas (retención aplicada)
+✔ hist_geo_dia: 395240 filas subidas (retención aplicada)
+✔ hist_nac_dia: 13235 filas subidas
+✔ hist_mun_mes: 385059 filas subidas
+✔ hist_prov_mes: 14216 filas subidas
+✔ hist_ccaa_mes: 5539 filas subidas
+✔ hist_estacion_mes: 856437 filas subidas
+✔ hist_meses_procesados: 0 filas subidas
+✔ resumen_nacional: 21 filas subidas
+✔ cron_progreso: 1 filas subidas
+
+== VERIFICACIÓN (destino vs origen-tras-retención) ==
+  ccaa                   destino=       19  origen=       19 ✔
+  provincias             destino=       52  origen=       52 ✔
+  municipios             destino=     3539  origen=     3539 ✔
+  productos              destino=       30  origen=       30 ✔
+  estaciones             destino=    13130  origen=    13130 ✔
+  precios                destino=    46792  origen=    46794 ✔
+  precios_historico      destino=  1054000  origen=  1067506 ✗ MISMATCH
+  hist_geo_dia           destino=   395240  origen=   395240 ✔
+  hist_nac_dia           destino=    13235  origen=    13235 ✔
+  hist_mun_mes           destino=   385059  origen=   385059 ✔
+  hist_prov_mes          destino=    14216  origen=    14216 ✔
+  hist_ccaa_mes          destino=     5539  origen=     5539 ✔
+  hist_estacion_mes      destino=   856437  origen=   856437 ✔
+  hist_meses_procesados  destino=        0  origen=        0 ✔
+  resumen_nacional       destino=       21  origen=       21 ✔
+  cron_progreso          destino=        1  origen=        1 ✔
+
+✗ HAY DISCREPANCIAS — revisar

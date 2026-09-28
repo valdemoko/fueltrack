@@ -1,17 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { DM_Sans } from "next/font/google";
-import Script from "next/script";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { CookieConsent } from "@/components/layout/CookieConsent";
 import { ConsentGate } from "@/components/layout/ConsentGate";
 import {
   SITE_URL,
   SITE_NAME,
   SITE_DESCRIPTION,
   GOOGLE_SITE_VERIFICATION,
-  COOKIEYES_CLIENT_KEY,
-  cookieYesEnabled,
 } from "@/lib/siteConfig";
 import "./globals.css";
 
@@ -53,6 +49,27 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+/**
+ * Consent Mode v2 — estado por defecto DENIED para las cuatro señales.
+ * Se emite ANTES de cualquier script de Google para que ningún servicio
+ * pueda instalar cookies con consentimiento pendiente. La CMP de Google
+ * (Privacy & Messaging, mensaje publicado en AdSense → Privacidad y
+ * mensajes → Reglamentos europeos) actualiza las señales según la decisión
+ * real del usuario; este sitio no duplica esa lógica ni mantiene banner
+ * propio.
+ */
+const CONSENT_MODE_DEFAULT = `
+window.dataLayer = window.dataLayer || [];
+function gtag(){dataLayer.push(arguments);}
+gtag('consent', 'default', {
+  ad_storage: 'denied',
+  analytics_storage: 'denied',
+  ad_user_data: 'denied',
+  ad_personalization: 'denied',
+  wait_for_update: 500
+});
+`;
+
 export default function RootLayout({
   children,
 }: {
@@ -61,21 +78,17 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${dmSans.variable} h-full`}>
       <head>
-        {/* CookieYes CMP — etiqueta literal dentro de <head> (requisito del
-            verificador de instalación de CookieYes: "paste between the <head>
-            tags, before any other scripts"). Solo se carga si la clave está
-            configurada mediante NEXT_PUBLIC_COOKIEYES_CLIENT_KEY. */}
-        {cookieYesEnabled && (
-          // eslint-disable-next-line @next/next/no-sync-scripts
-          <script
-            id="cookieyes"
-            type="text/javascript"
-            src={`https://cdn-cookieyes.com/client_data/${COOKIEYES_CLIENT_KEY}/script.js`}
-          />
-        )}
+        {/* Consent Mode por defecto (denied) — script inline que se ejecuta
+            sincrónicamente durante el parseo del HTML, antes que cualquier
+            script externo async de Google (patrón documentado por Google;
+            evita next/script beforeInteractive en App Router). */}
+        <script dangerouslySetInnerHTML={{ __html: CONSENT_MODE_DEFAULT }} />
+        {/* La CMP de Google y los scripts de AdSense/GA4 se cargan desde
+            ConsentGate (solo cuando NEXT_PUBLIC_GOOGLE_CMP_SRC está
+            configurado). CookieYes y el banner propio fueron eliminados. */}
       </head>
       <body className="min-h-full flex flex-col font-body antialiased bg-surface-primary text-content-primary">
-        {/* Carga AdSense/GA4 solo cuando CookieYes otorga consentimiento */}
+        {/* Carga de la CMP de Google + AdSense/GA4 bajo Consent Mode */}
         <ConsentGate />
 
         <a
@@ -89,7 +102,6 @@ export default function RootLayout({
           {children}
         </main>
         <Footer />
-        <CookieConsent />
       </body>
     </html>
   );

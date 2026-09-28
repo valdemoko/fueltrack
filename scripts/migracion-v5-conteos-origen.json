@@ -1,0 +1,66 @@
+{
+  "ccaa": {
+    "a_migrar": 19,
+    "filtro": null
+  },
+  "provincias": {
+    "a_migrar": 52,
+    "filtro": null
+  },
+  "municipios": {
+    "a_migrar": 3539,
+    "filtro": null
+  },
+  "productos": {
+    "a_migrar": 30,
+    "filtro": null
+  },
+  "estaciones": {
+    "a_migrar": 13130,
+    "filtro": null
+  },
+  "precios": {
+    "a_migrar": 46792,
+    "filtro": null
+  },
+  "precios_historico": {
+    "a_migrar": 1053652,
+    "filtro": "fecha >= '2026-08-17'"
+  },
+  "hist_geo_dia": {
+    "a_migrar": 383004,
+    "filtro": "fecha >= '2026-08-14'"
+  },
+  "hist_nac_dia": {
+    "a_migrar": 13214,
+    "filtro": null
+  },
+  "hist_mun_mes": {
+    "a_migrar": 385059,
+    "filtro": null
+  },
+  "hist_prov_mes": {
+    "a_migrar": 14216,
+    "filtro": null
+  },
+  "hist_ccaa_mes": {
+    "a_migrar": 5539,
+    "filtro": null
+  },
+  "hist_estacion_mes": {
+    "a_migrar": 856437,
+    "filtro": null
+  },
+  "hist_meses_procesados": {
+    "a_migrar": 0,
+    "filtro": null
+  },
+  "resumen_nacional": {
+    "a_migrar": 21,
+    "filtro": null
+  },
+  "cron_progreso": {
+    "a_migrar": 1,
+    "filtro": null
+  }
+}
