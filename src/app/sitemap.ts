@@ -18,6 +18,13 @@
  *
  * Excluye: parámetros de orden, filtros sin datos, páginas vacías y APIs.
  * Prioridad: calidad de contenido sobre cantidad de URLs.
+ *
+ * NOTA CLOUDFLARE (2026-09-30): la generación usa TRES queries agregadas,
+ * no un bucle de queries por CCAA/provincia. En Cloudflare Workers cada
+ * round-trip a Neon es una subrequest con un límite por invocación, y el
+ * bucle anidado original (19 CCAA × provincias × municipios) lo agotaba:
+ * abortaba a la primera CCAA y el catch tragaba el error dejando un
+ * sitemap con solo las páginas estáticas.
  */
 import type { MetadataRoute } from "next";
 import { sql } from "drizzle-orm";
@@ -25,7 +32,6 @@ import { db, queryAll, queryGet } from "@/lib/db";
 import { SITE_URL } from "@/lib/siteConfig";
 import { slugify } from "@/lib/geografia";
 import { seleccionarEstacionesFrescas } from "@/lib/sitemap-estaciones";
-
 
 export default function sitemap(): Promise<MetadataRoute.Sitemap> {
   // SIN unstable_cache adicional: la propia ruta /sitemap.xml es estática ISR
@@ -90,74 +96,79 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${SITE_URL}/contacto`, lastModified: fechaDatos, changeFrequency: "yearly", priority: 0.3 },
   ];
 
-  // ─── Geografía: CCAA → provincias → municipios con estaciones ──────────
+  // ─── Geografía: 3 queries agregadas, ensamblado en memoria ─────────────
   let geo: MetadataRoute.Sitemap = [];
   let productoURLs: MetadataRoute.Sitemap = [];
   try {
-    const ccaaRows = await queryAll<{ id: string; nombre: string }>(sql`
-      SELECT c.id, c.nombre FROM ccaa c
-      JOIN estaciones e ON e.ccaa_id = c.id
-      GROUP BY c.id, c.nombre
-    `);
+    const [ccaaRows, provinciaRows, municipioRows] = await Promise.all([
+      queryAll<{ id: string; nombre: string }>(sql`
+        SELECT c.id, c.nombre FROM ccaa c
+        JOIN estaciones e ON e.ccaa_id = c.id
+        GROUP BY c.id, c.nombre
+        ORDER BY c.nombre
+      `),
+      queryAll<{ id: string; nombre: string; ccaa_id: string }>(sql`
+        SELECT p.id, p.nombre, p.ccaa_id FROM provincias p
+        JOIN estaciones e ON e.provincia_id = p.id
+        GROUP BY p.id, p.nombre, p.ccaa_id
+        ORDER BY p.nombre
+      `),
+      queryAll<{ id: string; nombre: string; provincia_id: string; n: number }>(sql`
+        SELECT m.id, m.nombre, m.provincia_id, COUNT(e.id)::int AS n
+        FROM municipios m
+        JOIN estaciones e ON e.municipio_id = m.id
+        GROUP BY m.id, m.nombre, m.provincia_id
+        HAVING COUNT(e.id) >= ${MIN_ESTACIONES_MUNICIPIO}
+      `),
+    ]);
 
     const ccaaUrls: MetadataRoute.Sitemap = [];
     const provinciaUrls: MetadataRoute.Sitemap = [];
     const municipioUrls: MetadataRoute.Sitemap = [];
 
     for (const ccaa of ccaaRows) {
-      const ccaaSlug = slugify(ccaa.nombre);
       ccaaUrls.push({
-        url: `${SITE_URL}/gasolineras/${ccaaSlug}`,
+        url: `${SITE_URL}/gasolineras/${slugify(ccaa.nombre)}`,
         lastModified: fechaDatos,
         changeFrequency: "daily",
         priority: 0.8,
       });
+    }
 
-      const provincias = await queryAll<{ id: string; nombre: string }>(sql`
-        SELECT p.id, p.nombre FROM provincias p
-        JOIN estaciones e ON e.provincia_id = p.id
-        WHERE p.ccaa_id = ${ccaa.id}
-        GROUP BY p.id, p.nombre
-      `);
+    const nombreCcaa = new Map(ccaaRows.map((c) => [c.id, c.nombre]));
 
-      for (const provincia of provincias) {
-        const provinciaSlug = slugify(provincia.nombre);
-        provinciaUrls.push({
-          url: `${SITE_URL}/gasolineras/${ccaaSlug}/${provinciaSlug}`,
-          lastModified: fechaDatos,
-          changeFrequency: "daily",
-          priority: 0.8,
-        });
+    for (const provincia of provinciaRows) {
+      const ccaaNombre = nombreCcaa.get(provincia.ccaa_id);
+      if (!ccaaNombre) continue;
+      provinciaUrls.push({
+        url: `${SITE_URL}/gasolineras/${slugify(ccaaNombre)}/${slugify(provincia.nombre)}`,
+        lastModified: fechaDatos,
+        changeFrequency: "daily",
+        priority: 0.8,
+      });
+    }
 
-        // Municipios con suficientes estaciones (calidad > cantidad)
-        const municipios = await queryAll<{ id: string; nombre: string; n: number }>(sql`
-          SELECT m.id, m.nombre, COUNT(e.id)::int AS n
-          FROM municipios m
-          JOIN estaciones e ON e.municipio_id = m.id
-          WHERE m.provincia_id = ${provincia.id}
-          GROUP BY m.id, m.nombre
-          HAVING COUNT(e.id) >= ${MIN_ESTACIONES_MUNICIPIO}
-        `);
+    const provinciaPorId = new Map(provinciaRows.map((p) => [p.id, p]));
 
-        for (const municipio of municipios) {
-          municipioUrls.push({
-            url: `${SITE_URL}/gasolineras/${ccaaSlug}/${provinciaSlug}/${slugify(municipio.nombre)}`,
-            lastModified: fechaDatos,
-            changeFrequency: "daily",
-            priority: 0.7,
-          });
-        }
-      }
+    for (const municipio of municipioRows) {
+      const provincia = provinciaPorId.get(municipio.provincia_id);
+      const ccaaNombre = provincia ? nombreCcaa.get(provincia.ccaa_id) : undefined;
+      if (!provincia || !ccaaNombre) continue;
+      municipioUrls.push({
+        url: `${SITE_URL}/gasolineras/${slugify(ccaaNombre)}/${slugify(provincia.nombre)}/${slugify(municipio.nombre)}`,
+        lastModified: fechaDatos,
+        changeFrequency: "daily",
+        priority: 0.7,
+      });
     }
 
     geo = [...ccaaUrls, ...provinciaUrls, ...municipioUrls];
 
-    // ─── Variantes combustible + provincia / municipio (cobertura real) ───
+    // ─── Variantes combustible + provincia (cobertura real) ────────────────
     // (per-producto seeks; sin escaneos de 30M filas)
     productoURLs = [];
 
     // Fechas máximas por producto con datos (1 seek por producto)
-    // MAX(fecha) por producto = seek índice; filtra productos sin datos gratis
     const productosConDatos = (await queryAll(sql`
       SELECT DISTINCT producto_id AS id FROM precios
     `)) as unknown as Array<{ id: number }>;
@@ -170,7 +181,7 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
       if (f?.fecha) coberturas.push({ productoId: producto.id, fecha: f.fecha });
     }
 
-    // Combustible + provincia
+    // Combustible + provincia: UNA query para todos los productos
     const coberturaProvincia: Array<{ provincia_id: string; producto_id: number }> = [];
     for (const { productoId, fecha } of coberturas) {
       const filas = (await queryAll(sql`
@@ -208,61 +219,8 @@ async function generarSitemap(): Promise<MetadataRoute.Sitemap> {
     }
 
     // Combustible + municipio — DESACTIVADO (feb 2026): 3.181 URLs de
-    // casi-duplicados saturaban el crawl budget de un dominio nuevo
-    // ("Descubierta: actualmente sin indexar" +6.400 en Search Console).
-    // La query y el mapeo se conservan comentados para re-activarlos con
-    // solo descomentar cuando las páginas base estén indexadas.
-    // const coberturaMunicipio: Array<{ municipio_id: string; producto_id: number }> = [];
-    // for (const { productoId, fecha } of coberturas) {
-    //   const filas = (await queryAll(sql`
-    //     SELECT e.municipio_id
-    //     FROM precios pr JOIN estaciones e ON e.id = pr.estacion_id
-    //     WHERE pr.producto_id = ${productoId}
-    //       AND pr.fecha_observacion = ${fecha}
-    //       AND pr.precio IS NOT NULL
-    //     GROUP BY e.municipio_id
-    //     HAVING COUNT(DISTINCT pr.estacion_id) >= ${MIN_COBERTURA_PRODUCTO_MUNICIPIO}
-    //   `)) as unknown as Array<{ municipio_id: string }>;
-    //   for (const fila of filas) {
-    //     coberturaMunicipio.push({ municipio_id: fila.municipio_id, producto_id: productoId });
-    //   }
-    // }
-    void MIN_COBERTURA_PRODUCTO_MUNICIPIO; // (referencia viva para re-activar)
-
-    // const municipiosIndexables = (await queryAll(sql`
-    //   SELECT m.id, m.nombre, p.nombre AS provincia_nombre, c.nombre AS ccaa_nombre,
-    //          COUNT(e2.id) AS n_estaciones
-    //   FROM municipios m
-    //   JOIN provincias p ON p.id = m.provincia_id
-    //   JOIN ccaa c ON c.id = p.ccaa_id
-    //   LEFT JOIN estaciones e2 ON e2.municipio_id = m.id
-    //   GROUP BY m.id, m.nombre, p.nombre, c.nombre
-    //   HAVING COUNT(e2.id) >= ${MIN_ESTACIONES_MUNICIPIO}
-    // `) as unknown as Array<{
-    //   id: string;
-    //   nombre: string;
-    //   provincia_nombre: string;
-    //   ccaa_nombre: string;
-    //   n_estaciones: number;
-    // }>);
-    // const municipioIndexable = new Map(
-    //   municipiosIndexables.map((m) => [
-    //     m.id,
-    //     { ccaa: slugify(m.ccaa_nombre), prov: slugify(m.provincia_nombre), mun: slugify(m.nombre) },
-    //   ])
-    // );
-    //
-    // for (const fila of coberturaMunicipio) {
-    //   if (!NOMBRE_PRODUCTO[fila.producto_id]) continue;
-    //   const m = municipioIndexable.get(fila.municipio_id);
-    //   if (!m) continue;
-    //   productoURLs.push({
-    //     url: `${SITE_URL}/gasolineras/${m.ccaa}/${m.prov}/${m.mun}?producto=${fila.producto_id}`,
-    //     lastModified: fechaDatos,
-    //     changeFrequency: "daily",
-    //     priority: 0.6,
-    //   });
-    // }
+    // casi-duplicados saturaban el crawl budget de un dominio nuevo.
+    // Se re-activará cuando las páginas base estén indexadas (ver git log).
   } catch (error) {
     // DB no disponible en build time — solo páginas estáticas.
     // Log de diagnóstico (auditoría I3): un error silencioso aquí descartaba
