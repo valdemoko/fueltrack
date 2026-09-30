@@ -1,13 +1,16 @@
 /**
  * OG image de marca para todo el sitio (1200×630).
- * Generada en build/edge con la API nativa de Next (next/og):
+ * Generada en build con la API nativa de Next (next/og):
  * sin librerías externas y sin consultas a la base de datos.
  * Una sola imagen de marca común para todas las páginas (suficiente
  * para la metadata OG; ver auditoría I9).
+ *
+ * NOTA: sin `runtime = "edge"` — OpenNext en Cloudflare no soporta
+ * funciones edge dentro del bundle principal y el build falla con
+ * "cannot use the edge runtime". En Workers todo ya corre en workerd,
+ * así que el edge runtime no aporta nada aquí.
  */
 import { ImageResponse } from "next/og";
-
-export const runtime = "edge";
 // Caché larga: la imagen es estática de marca (revalidación mensual).
 export const revalidate = 2592000;
 
