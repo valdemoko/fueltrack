@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { DM_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { ConsentGate } from "@/components/layout/ConsentGate";
@@ -11,10 +11,18 @@ import {
 } from "@/lib/siteConfig";
 import "./globals.css";
 
-const dmSans = DM_Sans({
+// DM Sans auto-hospedada (fuente variable, wght 100-1000). Se usa
+// next/font/local en lugar de next/font/google para que el build de
+// producción no dependa de una petición en vivo a Google Fonts (issue
+// vercel/next.js #99114: el loader falla de forma intermitente cuando
+// Google responde con URLs sin extensión).
+const dmSans = localFont({
   variable: "--font-dm-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+  src: [
+    { path: "../fonts/DMSans-latin.woff2", style: "normal" },
+    { path: "../fonts/DMSans-latin-ext.woff2", style: "normal" },
+  ],
 });
 
 export const metadata: Metadata = {
