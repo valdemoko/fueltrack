@@ -2,8 +2,9 @@
  * Worker personalizado de FuelTrack (patrón oficial de OpenNext "Custom
  * Worker"): reutiliza el worker generado por `opennextjs-cloudflare build`
  * (.open-next/worker.js) y le añade el handler `scheduled` que ejecuta la
- * actualización semanal de datos cuando lo dispara el Cron Trigger de
- * Cloudflare declarado en wrangler.jsonc.
+ * actualización DIARIA de datos cuando lo dispara el Cron Trigger de
+ * Cloudflare declarado en wrangler.jsonc (08:00 UTC, como el cron de Vercel
+ * que sustituye).
  *
  * El flujo es EXACTAMENTE el mismo que el de /api/cron (que sigue disponible
  * como vía manual protegida por CRON_SECRET): ambos llaman a

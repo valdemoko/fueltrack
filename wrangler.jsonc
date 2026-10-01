@@ -9,10 +9,13 @@
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
-	// Cron Trigger semanal: los lunes a las 08:00 UTC (10:00 en España en
-	// verano, 09:00 en invierno). Cloudflare Cron SIEMPRE usa UTC.
+	// Cron Trigger DIARIO a las 08:00 UTC (10:00 en España en verano, 09:00 en
+	// invierno), igual que el cron de Vercel que sustituye. Cloudflare Cron
+	// SIEMPRE usa UTC. MITECO publica un parte diario y las tablas de agregados
+	// diarios (hist_geo_dia, precios_historico) necesitan ingesta cada día; el
+	// proceso es idempotente (cron_progreso), así que repeticiones no duplican.
 	"triggers": {
-		"crons": ["0 8 * * 1"]
+		"crons": ["0 8 * * *"]
 	},
 	"assets": {
 		"directory": ".open-next/assets",
