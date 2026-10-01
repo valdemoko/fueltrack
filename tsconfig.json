@@ -37,6 +37,9 @@
     "**/*.mts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "worker.ts",
+    "worker-configuration.d.ts",
+    "tsconfig.worker.json"
   ]
 }

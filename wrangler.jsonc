@@ -1,12 +1,19 @@
 {
 	"$schema": "node_modules/wrangler/config-schema.json",
-	"main": ".open-next/worker.js",
+	// Custom worker: reutiliza el worker generado por OpenNext y añade el
+	// handler `scheduled` para el Cron Trigger (ver worker.ts).
+	"main": "worker.ts",
 	"name": "fueltrack",
 	"compatibility_date": "2026-09-30",
 	"compatibility_flags": [
 		"nodejs_compat",
 		"global_fetch_strictly_public"
 	],
+	// Cron Trigger semanal: los lunes a las 08:00 UTC (10:00 en España en
+	// verano, 09:00 en invierno). Cloudflare Cron SIEMPRE usa UTC.
+	"triggers": {
+		"crons": ["0 8 * * 1"]
+	},
 	"assets": {
 		"directory": ".open-next/assets",
 		"binding": "ASSETS"
