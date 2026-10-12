@@ -41,10 +41,10 @@ export default function ContactoPage() {
                 <h2 className="font-medium text-stone-900">Email</h2>
               </div>
               <a
-                href="mailto:contacto@fueltrack.site"
+                href="mailto:contacto.webproyectos@gmail.com"
                 className="text-amber-600 hover:text-amber-700 text-sm"
               >
-                contacto@fueltrack.site
+                contacto.webproyectos@gmail.com
               </a>
             </div>
 

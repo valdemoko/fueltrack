@@ -21,7 +21,7 @@ const jsonLd = {
       "@id": `${SITE_URL}/#organization`,
       name: SITE_NAME,
       url: SITE_URL,
-      email: "contacto@fueltrack.site",
+      email: "contacto.webproyectos@gmail.com",
       founder: { "@id": `${SITE_URL}/autor#person` },
     },
   ],

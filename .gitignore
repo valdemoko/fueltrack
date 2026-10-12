@@ -5,7 +5,8 @@
 
 # opennext / wrangler build output
 .open-next/
-.wrangler/.pnp
+.wrangler/
+.pnp
 .pnp.*
 .yarn/*
 !.yarn/patches
